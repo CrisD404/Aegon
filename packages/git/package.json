@@ -1,0 +1,22 @@
+{
+  "name": "@aegon/git",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sincronización de workspaces con git: CLI del sistema (escritorio/Node) y GitHub API (web), con merge semántico por entidad.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@aegon/core": "workspace:*",
+    "@aegon/format-yaml": "workspace:*",
+    "@aegon/storage": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

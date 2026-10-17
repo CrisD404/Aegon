@@ -1,0 +1,44 @@
+{
+  "name": "@aegon/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "App de Aegon: lienzo C4 (ReactFlow), explorador, inspector y cambios en borrador.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p .",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@aegon/core": "workspace:*",
+    "@aegon/format-yaml": "workspace:*",
+    "@aegon/git": "workspace:*",
+    "@aegon/icons": "workspace:*",
+    "@aegon/storage": "workspace:*",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@tanstack/react-virtual": "^3.14.21",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
+    "@xyflow/react": "^12.12.0",
+    "cmdk": "^1.1.1",
+    "idb-keyval": "^6.3.0",
+    "lucide-react": "^1.58.0",
+    "motion": "^14.3.0",
+    "radix-ui": "^1.8.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.4"
+  }
+}

@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+  - apps/*
+minimumReleaseAgeExclude:
+  - '@tanstack/react-virtual@3.14.21'
+  - '@tanstack/virtual-core@3.19.6'
+  - lucide-react@1.58.0

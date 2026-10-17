@@ -1,0 +1,20 @@
+{
+  "name": "@aegon/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "App de escritorio de Aegon (Tauri 2): la misma UI web con disco nativo, git del sistema y observador de archivos.",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:exe": "tauri build --no-bundle",
+    "icons": "tauri icon ../web/public/favicon.svg",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.3",
+    "@playwright/test": "^1.64.1",
+    "@aegon/core": "workspace:*",
+    "@aegon/format-yaml": "workspace:*"
+  }
+}

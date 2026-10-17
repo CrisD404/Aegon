@@ -1,0 +1,23 @@
+architect: Cristian
+companyName: AcmeCorp
+createdAt: 1778541888808
+description: Descripción breve
+environments:
+  - id: env-dev
+    name: dev
+    order: 0
+  - id: env-qa
+    name: qa
+    order: 1
+  - id: env-pre
+    name: pre
+    order: 2
+  - id: env-prod
+    name: prod
+    order: 3
+id: default-workspace
+name: Repo workspace
+solutionName: Solución1
+updatedAt: 1778696851479
+version: "1.0"
+workspaceUuid: iLM9hYJ_5bWoelRHXus99

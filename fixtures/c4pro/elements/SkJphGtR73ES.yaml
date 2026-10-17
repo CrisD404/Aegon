@@ -1,0 +1,38 @@
+actorVolume:
+  metric: mau
+  value: 0
+costByEnv: {}
+createdAt: 1778718694767
+detailedDescription: |-
+  ## Hola
+
+  \*\*a\*\*
+
+  \*a\*
+
+  1. a
+  2. 1
+  3. 2
+
+  b.
+
+  a.
+
+  \*\*\*a\*\*\*
+displayDescription: ""
+enabledEnvironments:
+  - env-qa
+  - env-pre
+  - env-prod
+  - env-dev
+finopsTags:
+  businessUnit: uc1
+id: SkJphGtR73ES
+name: New Actor
+scope: external
+status: live
+tags: []
+type: actor
+updatedAt: 1778879074726
+volumeByEnv: {}
+workspaceId: default-workspace

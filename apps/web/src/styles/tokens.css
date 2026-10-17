@@ -1,0 +1,137 @@
+/*
+ * Design system de Aegon. Parte del logo: tinta #07090F, blanco y un único acento frío.
+ * Todo color de la UI sale de estas variables; el modo claro/oscuro solo las redefine.
+ */
+
+:root {
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 260ms;
+
+  --topbar-h: 48px;
+  --ruler: 20px;
+}
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --canvas: #f5f6f8;
+  --canvas-dot: rgb(7 9 15 / 0.09);
+  --canvas-line: rgb(7 9 15 / 0.05);
+  --panel: #ffffff;
+  --raised: #f3f4f7;
+  --hover: #eceef2;
+  --press: #e3e6ec;
+  --line: rgb(7 9 15 / 0.08);
+  --line-strong: rgb(7 9 15 / 0.15);
+  --fg: #07090f;
+  --fg-muted: #4a5163;
+  --fg-subtle: #8b92a3;
+  --accent: #3d5afe;
+  --accent-hover: #2f4bf0;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(61 90 254 / 0.1);
+  --accent-ring: rgb(61 90 254 / 0.35);
+
+  --node-bg: #ffffff;
+  --node-border: rgb(7 9 15 / 0.1);
+  --node-shadow: 0 1px 2px rgb(7 9 15 / 0.05), 0 4px 14px rgb(7 9 15 / 0.05);
+  --node-shadow-hover: 0 2px 4px rgb(7 9 15 / 0.06), 0 10px 28px rgb(7 9 15 / 0.09);
+  --edge: #9aa1b2;
+  --edge-active: var(--accent);
+  --edge-label-bg: #ffffff;
+
+  --shadow-pop: 0 1px 2px rgb(7 9 15 / 0.06), 0 12px 32px rgb(7 9 15 / 0.12);
+  --overlay: rgb(7 9 15 / 0.28);
+
+  --risk-low: #1f9d63;
+  --risk-medium: #b7860b;
+  --risk-high: #d46418;
+  --risk-critical: #d93b45;
+  --ok: #1f9d63;
+  --warn: #b7860b;
+  --danger: #d93b45;
+
+  --kind-actor: #b4568a;
+  --kind-system: #3d5afe;
+  --kind-container: #0f8f86;
+  --kind-component: #7a5af5;
+  --kind-store: #b26a12;
+  --kind-bus: #4d7c0f;
+  --kind-group: #5c6478;
+
+  --provider-aws: #c96f0a;
+  --provider-gcp: #2f6fe0;
+  --provider-azure: #1677c9;
+  --provider-onprem: #5c6478;
+  --provider-network: #0f8f86;
+  --provider-platform: #7a5af5;
+  --provider-other: #5c6478;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: #07090f;
+  --canvas-dot: rgb(255 255 255 / 0.075);
+  --canvas-line: rgb(255 255 255 / 0.04);
+  --panel: #0c0f16;
+  --raised: #121620;
+  --hover: #181d29;
+  --press: #1f2533;
+  --line: rgb(255 255 255 / 0.07);
+  --line-strong: rgb(255 255 255 / 0.13);
+  --fg: #f3f5fa;
+  --fg-muted: #a4acbd;
+  --fg-subtle: #6a7285;
+  --accent: #8aa2ff;
+  --accent-hover: #a3b6ff;
+  --accent-fg: #07090f;
+  --accent-soft: rgb(138 162 255 / 0.13);
+  --accent-ring: rgb(138 162 255 / 0.4);
+
+  --node-bg: #10141d;
+  --node-border: rgb(255 255 255 / 0.09);
+  --node-shadow: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 8px 24px rgb(0 0 0 / 0.35);
+  --node-shadow-hover: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 12px 32px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(138 162 255 / 0.12);
+  --edge: #4b5468;
+  --edge-active: var(--accent);
+  --edge-label-bg: #0c0f16;
+
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 16px 40px rgb(0 0 0 / 0.55);
+  --overlay: rgb(0 0 0 / 0.5);
+
+  --risk-low: #4cc38a;
+  --risk-medium: #e3b341;
+  --risk-high: #f0883e;
+  --risk-critical: #f2555a;
+  --ok: #4cc38a;
+  --warn: #e3b341;
+  --danger: #f2555a;
+
+  --kind-actor: #e58fbf;
+  --kind-system: #8aa2ff;
+  --kind-container: #4fd1c5;
+  --kind-component: #ab98ff;
+  --kind-store: #f2b263;
+  --kind-bus: #a3d65c;
+  --kind-group: #8b93a7;
+
+  --provider-aws: #f5a142;
+  --provider-gcp: #7aa7ff;
+  --provider-azure: #5fb2f5;
+  --provider-onprem: #8b93a7;
+  --provider-network: #4fd1c5;
+  --provider-platform: #ab98ff;
+  --provider-other: #8b93a7;
+}

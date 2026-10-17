@@ -1,0 +1,35 @@
+{
+  "name": "aegon",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Aegon — diagramas C4 como código, con un lienzo moderno y pensado para IA.",
+  "license": "MIT",
+  "author": "CrisD404",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @aegon/web dev",
+    "build": "pnpm typecheck && pnpm --filter @aegon/web build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "pnpm --filter @aegon/web test:e2e",
+    "gen:schema": "pnpm --filter @aegon/core gen:schema",
+    "gen:large": "node fixtures/gen-large.ts",
+    "format": "prettier --write .",
+    "desktop:dev": "pnpm --filter @aegon/desktop dev",
+    "desktop:build": "pnpm --filter @aegon/desktop build:exe",
+    "test:desktop": "pnpm --filter @aegon/desktop test:e2e"
+  },
+  "devDependencies": {
+    "@aegon/core": "workspace:*",
+    "@aegon/format-yaml": "workspace:*",
+    "@types/node": "^24.0.0",
+    "prettier": "^3.6.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

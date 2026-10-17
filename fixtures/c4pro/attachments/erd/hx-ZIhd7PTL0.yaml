@@ -1,0 +1,8 @@
+body: "{\"source\":\"c4pro-erd-v3\",\"activeViewId\":\"erd-view-default\",\"views\":[{\"id\":\"erd-view-default\",\"name\":\"Main\",\"groups\":[{\"id\":\"erd-group-default\",\"name\":\"Default\",\"color\":\"slate\",\"position\":{\"x\":40,\"y\":40},\"width\":420,\"height\":280}],\"schemes\":[{\"id\":\"erd-scheme-default\",\"groupId\":\"erd-group-default\",\"name\":\"public\",\"color\":\"sky\",\"position\":{\"x\":12,\"y\":36},\"width\":360,\"height\":200}],\"entities\":[{\"id\":\"gNJrwKIfQDPy\",\"schemeId\":\"erd-scheme-default\",\"name\":\"NewEntity\",\"fields\":[{\"id\":\"z8bFQTpO20er\",\"name\":\"id\",\"type\":\"uuid\",\"isPK\":true,\"nullable\":false},{\"id\":\"Ebsw5dsgElOm\",\"name\":\"field\",\"type\":\"string\",\"nullable\":true}],\"position\":{\"x\":16,\"y\":44}}],\"relations\":[]}]}"
+createdAt: 1778720328188
+id: hx-ZIhd7PTL0
+kind: erd
+metadata: {}
+title: ERD
+updatedAt: 1778720334198
+workspaceId: default-workspace

@@ -1,0 +1,25 @@
+{
+  "name": "@aegon/icons",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Iconografía de Aegon: glifos C4 propios y marcas monocromas con un mismo estilo minimalista.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "gen:brands": "node scripts/gen-brands.ts"
+  },
+  "dependencies": {
+    "@aegon/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "simple-icons": "^16.35.0"
+  }
+}

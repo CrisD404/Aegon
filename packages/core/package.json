@@ -1,0 +1,17 @@
+{
+  "name": "@aegon/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Modelo C4 de Aegon: esquemas, operaciones, reglas y diff semántico. Sin dependencias de UI.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "gen:schema": "node scripts/gen-schema.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

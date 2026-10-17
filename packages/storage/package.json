@@ -1,0 +1,20 @@
+{
+  "name": "@aegon/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Adaptadores de almacenamiento de workspaces: memoria, IndexedDB y carpetas locales (File System Access API).",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "idb-keyval": "^6.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

@@ -1,0 +1,27 @@
+createdAt: 1778541888806
+id: root-landscape
+layout:
+  - elementId: 6Tcp0Lzw2i1-
+    height: 260
+    width: 360
+    x: 32
+    "y": 459
+  - elementId: 166ekYIKSMyK
+    height: 96
+    width: 200
+    x: -244
+    "y": 186
+  - elementId: I0A5OsAkf3hC
+    height: 96
+    width: 224
+    x: 106
+    "y": 558
+  - elementId: TUtPCM29ig3w
+    height: 96
+    width: 224
+    x: 114
+    "y": 187
+level: 1
+name: C4-TURNOS
+updatedAt: 1778715479079
+workspaceId: default-workspace

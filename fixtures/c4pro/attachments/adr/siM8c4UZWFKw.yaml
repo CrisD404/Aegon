@@ -1,0 +1,45 @@
+body: |
+  # Context
+
+  Describe the issue we're trying to solve. Include any relevant background, constraints, and forces at play.
+
+  # Decision
+
+  State the change in active voice. _"We will...", "We chose..."_
+
+  # Consequences
+
+  ## Positive
+
+  - What good things result from this decision
+
+  ## Negative
+
+  - What's the downside? Trade-offs accepted
+
+  ## Follow-ups
+
+  - [ ] Action items needed to implement the decision
+
+  # Alternatives Considered
+
+  - **Option A**: ... — rejected because ...
+  - **Option B**: ... — rejected because ...
+
+  # References
+
+  - Link to related ADR or external doc
+createdAt: 1778724407752
+id: siM8c4UZWFKw
+kind: adr
+metadata:
+  adrNumber: ADR-002
+  author: ""
+  description: ""
+  status: proposed
+  statusHistory:
+    - at: 1778724407752
+      status: proposed
+title: ADR-002 — Untitled decision
+updatedAt: 1778724407752
+workspaceId: default-workspace
