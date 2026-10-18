@@ -1,0 +1,7 @@
+id: notificaciones
+kind: system
+name: Notificaciones
+description: Envía e-mails, SMS y push a los clientes.
+groups: [ aws-us-east-1 ]
+risk: low
+technology: [ nodejs ]

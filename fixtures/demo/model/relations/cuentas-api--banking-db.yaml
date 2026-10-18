@@ -1,0 +1,5 @@
+id: cuentas-api--banking-db
+from: cuentas-api
+to: banking-db
+label: Lee y escribe
+protocols: [ jdbc ]

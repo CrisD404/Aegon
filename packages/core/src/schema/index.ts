@@ -6,12 +6,12 @@ import { z } from 'zod';
  * Reglas generales:
  * - Los IDs son legibles (`payments-api`) e inmutables: renombrar un elemento no cambia su ID.
  * - Los campos opcionales con valor por defecto se omiten al serializar para mantener el YAML limpio.
- * - `extensions` guarda datos que Aegon todavía no modela (por ejemplo FinOps importado de C4Pro).
+ * - `extensions` guarda datos que Aegon todavía no modela (por ejemplo, de otras herramientas).
  */
 
 export const SCHEMA_VERSION = 2;
 
-/** Acepta slugs y también los IDs nanoid heredados de C4Pro (pueden empezar con `-` o `_`). */
+/** Acepta slugs y también IDs generados por otras herramientas (pueden empezar con `-` o `_`). */
 export const Id = z
   .string()
   .min(1)
@@ -43,6 +43,26 @@ export type Link = z.infer<typeof Link>;
 const Extensions = z.record(z.string(), z.unknown());
 const Properties = z.record(z.string(), z.string());
 
+/** Costo mensual estimado de un elemento en un ambiente (en la moneda del workspace). */
+export const CostEntry = z.object({
+  monthly: z.number().nonnegative(),
+  /** Réplicas, instancias o nodos. */
+  replicas: z.number().int().positive().optional(),
+  /** Tamaño o SKU (ej. `m6i.large`, `db.r6g.xlarge`, `Standard_D4s_v5`). */
+  sku: z.string().optional(),
+  note: z.string().optional(),
+});
+export type CostEntry = z.infer<typeof CostEntry>;
+
+/** Datos FinOps de un elemento. */
+export const FinOps = z.object({
+  /** Costo por ambiente (clave: ID de un ambiente del workspace). */
+  costs: z.record(Id, CostEntry).optional(),
+  /** Etiquetas de asignación de costos (`cost-center`, `project`, `owner`…). */
+  tags: z.record(z.string(), z.string()).optional(),
+});
+export type FinOps = z.infer<typeof FinOps>;
+
 const baseElement = {
   id: Id,
   name: z.string().min(1),
@@ -61,6 +81,9 @@ const baseElement = {
   tags: z.array(z.string()).optional(),
   links: z.array(Link).optional(),
   owner: z.string().optional(),
+  /** Ambientes donde está desplegado (IDs del workspace). Sin el campo: en todos. */
+  environments: z.array(Id).optional(),
+  finops: FinOps.optional(),
   properties: Properties.optional(),
   extensions: Extensions.optional(),
 };
@@ -271,6 +294,26 @@ export const View = z.object({
 });
 export type View = z.infer<typeof View>;
 
+/** Ambiente de despliegue (dev, qa, pre, prod…). El orden de la lista es el de la interfaz. */
+export const Environment = z.object({
+  id: Id,
+  name: z.string().min(1),
+});
+export type Environment = z.infer<typeof Environment>;
+
+export const FinOpsSettings = z.object({
+  /** Moneda de los costos (código ISO 4217). Por defecto `USD`. */
+  currency: z
+    .string()
+    .regex(/^[A-Z]{3}$/, 'Moneda inválida: usá un código ISO de tres letras (USD, EUR, ARS…)')
+    .optional(),
+  /** Claves de etiquetas FinOps que se sugieren al cargar costos. */
+  tagKeys: z.array(z.string().min(1)).optional(),
+  /** Presupuesto mensual por ambiente. */
+  budgets: z.record(Id, z.number().nonnegative()).optional(),
+});
+export type FinOpsSettings = z.infer<typeof FinOpsSettings>;
+
 export const WorkspaceMeta = z.object({
   schema: z.literal(SCHEMA_VERSION),
   id: Id,
@@ -280,9 +323,113 @@ export const WorkspaceMeta = z.object({
   architect: z.string().optional(),
   /** Lienzo que se abre por defecto. */
   defaultView: Id.optional(),
+  environments: z.array(Environment).optional(),
+  finops: FinOpsSettings.optional(),
   extensions: Extensions.optional(),
 });
 export type WorkspaceMeta = z.infer<typeof WorkspaceMeta>;
+
+// -----------------------------------------------------------------------------------------------
+// Flujos: secuencias de pasos sobre el modelo que se reproducen como presentación.
+
+const stepBase = {
+  /** Título corto (se muestra con el número del paso). */
+  title: z.string().optional(),
+  /** Detalle en Markdown: payload, endpoint, reglas… */
+  description: z.string().optional(),
+};
+
+/** Un elemento le habla a otro (normalmente sobre una relación existente). */
+export const MessageStep = z.object({
+  ...stepBase,
+  type: z.literal('message'),
+  from: Id,
+  to: Id,
+  /** Relación que representa el mensaje; si falta, se busca la del par. */
+  relation: Id.optional(),
+});
+/** Un elemento hace algo por su cuenta ("valida el token", "calcula el riesgo"). */
+export const ProcessStep = z.object({ ...stepBase, type: z.literal('process'), element: Id });
+/** Contexto sin elementos: una nota, un link, una aclaración. */
+export const NoteStep = z.object({ ...stepBase, type: z.literal('note') });
+/** Continúa en otro flujo (y vuelve al terminarlo). */
+export const GotoStep = z.object({ ...stepBase, type: z.literal('goto'), flow: Id });
+
+export const LeafStep = z.discriminatedUnion('type', [MessageStep, ProcessStep, NoteStep, GotoStep]);
+export type LeafStep = z.infer<typeof LeafStep>;
+
+export const FlowPath = z.object({
+  name: z.string().min(1),
+  steps: z.array(LeafStep),
+});
+export type FlowPath = z.infer<typeof FlowPath>;
+
+/** Bifurcación: caminos alternativos (uno u otro) o paralelos (todos a la vez). */
+export const PathsStep = z.object({
+  ...stepBase,
+  type: z.literal('paths'),
+  mode: z.enum(['alternate', 'parallel']),
+  paths: z.array(FlowPath).min(1),
+});
+
+export const FlowStep = z.discriminatedUnion('type', [MessageStep, ProcessStep, NoteStep, GotoStep, PathsStep]);
+export type FlowStep = z.infer<typeof FlowStep>;
+export type FlowStepType = FlowStep['type'];
+
+export const Flow = z.object({
+  id: Id,
+  name: z.string().min(1),
+  description: z.string().optional(),
+  /** Lienzo donde se reproduce (los pasos con elementos de otro nivel abren el lienzo que los muestra). */
+  view: Id.optional(),
+  steps: z.array(FlowStep),
+  extensions: Extensions.optional(),
+});
+export type Flow = z.infer<typeof Flow>;
+
+// -----------------------------------------------------------------------------------------------
+// Comentarios flotantes sobre un lienzo.
+
+export const COMMENT_ICONS = ['message', 'info', 'question', 'warning', 'idea', 'check', 'flag', 'bug', 'lock', 'star'] as const;
+export const CommentIcon = z.enum(COMMENT_ICONS);
+export type CommentIcon = z.infer<typeof CommentIcon>;
+
+export const COMMENT_COLORS = ['accent', 'ok', 'warn', 'danger', 'violet', 'neutral'] as const;
+export const CommentColor = z.enum(COMMENT_COLORS);
+export type CommentColor = z.infer<typeof CommentColor>;
+
+export const CommentReply = z.object({
+  author: z.string().min(1),
+  /** Fecha ISO 8601. */
+  at: z.string().min(1),
+  body: z.string().min(1),
+});
+export type CommentReply = z.infer<typeof CommentReply>;
+
+export const Comment = z.object({
+  id: Id,
+  view: Id,
+  /**
+   * Posición en el lienzo. Con `element`, es relativa a la esquina del elemento (el comentario se
+   * mueve con él); sin `element`, es absoluta.
+   */
+  x: z.number(),
+  y: z.number(),
+  element: Id.optional(),
+  /** Por defecto `message`. */
+  icon: CommentIcon.optional(),
+  /** Por defecto `accent`. */
+  color: CommentColor.optional(),
+  title: z.string().optional(),
+  body: z.string().min(1),
+  author: z.string().min(1),
+  at: z.string().min(1),
+  /** Última edición del texto (ISO 8601). */
+  edited: z.string().optional(),
+  resolved: z.boolean().optional(),
+  replies: z.array(CommentReply).optional(),
+});
+export type Comment = z.infer<typeof Comment>;
 
 /** Esquemas exportados como JSON Schema (para agentes de IA y editores YAML). */
 export const jsonSchemas = {
@@ -290,4 +437,6 @@ export const jsonSchemas = {
   element: Element,
   relation: Relation,
   view: View,
+  flow: Flow,
+  comment: Comment,
 } as const;

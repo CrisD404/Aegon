@@ -1,0 +1,6 @@
+id: core-client
+kind: component
+name: Core Client
+description: Adaptador gRPC hacia el core bancario.
+parent: pagos-api
+technology: [ go ]

@@ -7,6 +7,9 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   fullyParallel: true,
+  // Con más workers, los flujos que esperan workers de ELK/YAML o el GitHub simulado se vuelven
+  // inestables cuando la máquina está cargada.
+  workers: 6,
   reporter: [['list']],
   use: { baseURL: 'http://localhost:5181', trace: 'retain-on-failure' },
   webServer: { command: 'pnpm build && pnpm preview', url: 'http://localhost:5181', reuseExistingServer: true, timeout: 120_000 },

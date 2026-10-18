@@ -1,0 +1,7 @@
+id: app-movil
+kind: container
+name: App móvil
+description: iOS y Android.
+parent: home-banking
+technology: [ flutter ]
+containerType: mobile

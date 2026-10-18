@@ -4,8 +4,35 @@ import { loadPrefs, savePrefs } from '../lib/persist.ts';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 export type GridMode = 'dots' | 'lines' | 'none';
-export type RightTab = 'inspector' | 'changes';
-export type SidebarTab = 'model' | 'groups' | 'views';
+export type RightTab = 'inspector' | 'changes' | 'costs' | 'comments';
+export type SidebarTab = 'model' | 'groups' | 'views' | 'flows';
+
+/** Ubicación de un paso: `[i]` en el flujo o `[i, camino, j]` dentro de una bifurcación. */
+export type StepPath = [number] | [number, number, number];
+
+/** Elegir en el lienzo los elementos de un paso (origen y destino, o el elemento de un proceso). */
+export interface StepPick {
+  flow: Id;
+  /** Dónde va el paso: reemplaza el de `path` o se agrega al final (`append`) de la lista. */
+  path: StepPath | null;
+  append?: { top?: number; path?: number };
+  kind: 'message' | 'process';
+  from?: Id;
+}
+
+/** Estado del reproductor de flujos (modo presentación). */
+export interface PlayerState {
+  flow: Id;
+  /** -1 = portada; `frames.length` = cierre. */
+  index: number;
+  /** Camino elegido en cada bifurcación alternativa (por índice de paso de primer nivel). */
+  choices: Record<number, number>;
+  autoplay: boolean;
+  /** Flujos desde los que se saltó con "ir a otro flujo" (para volver). */
+  stack: { flow: Id; index: number; choices: Record<number, number> }[];
+  /** Lienzo activo antes de reproducir (se vuelve al salir). */
+  returnView: Id | null;
+}
 export type Transition = 'in' | 'out' | 'fade' | null;
 
 interface Prefs {
@@ -13,6 +40,18 @@ interface Prefs {
   grid: GridMode;
   snap: boolean;
   rulers: boolean;
+  /** Minimapa del lienzo (abajo a la derecha). */
+  minimap: boolean;
+  /** Modo foco: con algo seleccionado, se atenúa lo que no es dependencia directa. */
+  focusMode: boolean;
+  /** Capa de costos en el lienzo (badges y calor). */
+  costOverlay: boolean;
+  /** Comentarios visibles en el lienzo. */
+  showComments: boolean;
+  /** Nombre con el que se firman los comentarios (en este equipo). */
+  commentAuthor: string;
+  /** Ambiente elegido para costos (null = todos). */
+  costEnv: string | null;
   sidebarOpen: boolean;
   rightOpen: boolean;
   sidebarTab: SidebarTab;
@@ -50,6 +89,22 @@ interface UiState extends Prefs {
   fresh: ReadonlySet<Id>;
   toasts: Toast[];
   renameRequest: number;
+  /** Flujo abierto en el editor y paso seleccionado. */
+  flowEdit: { id: Id; step: StepPath | null } | null;
+  setFlowEdit(edit: { id: Id; step: StepPath | null } | null): void;
+  stepPick: StepPick | null;
+  setStepPick(pick: StepPick | null): void;
+  player: PlayerState | null;
+  setPlayer(player: PlayerState | null): void;
+  /** Modo "comentar": el próximo click en el lienzo crea un comentario ahí. */
+  commentMode: boolean;
+  setCommentMode(on: boolean): void;
+  /** Comentario abierto (tarjeta expandida). */
+  openComment: Id | null;
+  setOpenComment(id: Id | null): void;
+  /** Búsqueda en el lienzo activo (Ctrl+F). */
+  search: { open: boolean; query: string; index: number };
+  setSearch(patch: Partial<UiState['search']>): void;
   /** Diálogo de GitHub abierto: vincular el workspace actual o abrir uno del repo. */
   githubDialog: 'link' | 'open' | null;
   setGitHubDialog(mode: 'link' | 'open' | null): void;
@@ -73,13 +128,20 @@ const PREF_DEFAULTS: Prefs = {
   grid: 'dots',
   snap: true,
   rulers: true,
+  minimap: false,
+  focusMode: false,
+  costOverlay: false,
+  costEnv: null,
+  showComments: true,
+  commentAuthor: '',
   sidebarOpen: true,
   rightOpen: true,
   sidebarTab: 'model',
 };
 
 const prefs = loadPrefs(PREF_DEFAULTS);
-const media = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+const media =
+  typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
 function resolveTheme(theme: ThemePref): 'light' | 'dark' {
   if (theme === 'system') return media?.matches ? 'dark' : 'light';
@@ -108,6 +170,30 @@ export const useUi = create<UiState>((set, get) => ({
   toasts: [],
   renameRequest: 0,
   githubDialog: null,
+  flowEdit: null,
+  setFlowEdit(edit) {
+    set({ flowEdit: edit });
+  },
+  stepPick: null,
+  setStepPick(pick) {
+    set({ stepPick: pick, ghost: null });
+  },
+  player: null,
+  setPlayer(player) {
+    set({ player });
+  },
+  commentMode: false,
+  setCommentMode(on) {
+    set({ commentMode: on, ghost: null, stepPick: null });
+  },
+  openComment: null,
+  setOpenComment(id) {
+    set({ openComment: id });
+  },
+  search: { open: false, query: '', index: 0 },
+  setSearch(patch) {
+    set({ search: { ...get().search, ...patch } });
+  },
   setGitHubDialog(mode) {
     set({ githubDialog: mode });
   },
@@ -120,15 +206,11 @@ export const useUi = create<UiState>((set, get) => ({
       set({ resolvedTheme: resolved });
     }
     const s = get();
-    savePrefs({
-      theme: s.theme,
-      grid: s.grid,
-      snap: s.snap,
-      rulers: s.rulers,
-      sidebarOpen: s.sidebarOpen,
-      rightOpen: s.rightOpen,
-      sidebarTab: s.sidebarTab,
-    } satisfies Prefs);
+    savePrefs(
+      Object.fromEntries(
+        Object.keys(PREF_DEFAULTS).map((k) => [k, s[k as keyof Prefs]]),
+      ) as unknown as Prefs,
+    );
   },
 
   openView(id, opts = {}) {
@@ -139,6 +221,7 @@ export const useUi = create<UiState>((set, get) => ({
       focusId: opts.focus ?? null,
       selection: { nodes: opts.focus ? [opts.focus] : [], edges: [] },
       ghost: null,
+      search: { ...get().search, index: 0 },
     });
   },
 
@@ -158,7 +241,9 @@ export const useUi = create<UiState>((set, get) => ({
 
   toggleLevel(level) {
     const current = get().levelFilter;
-    const next = current.includes(level) ? current.filter((l) => l !== level) : [...current, level].sort();
+    const next = current.includes(level)
+      ? current.filter((l) => l !== level)
+      : [...current, level].sort();
     set({ levelFilter: next.length ? next : [1, 2, 3] });
   },
 

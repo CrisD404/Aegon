@@ -1,0 +1,5 @@
+id: api-gateway--cuentas-api
+from: api-gateway
+to: cuentas-api
+label: Rutea
+protocols: [ rest ]

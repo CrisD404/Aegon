@@ -15,6 +15,19 @@ import {
 import { TechIcon } from '@aegon/icons';
 import type { ElementFlowNode } from '../derive.ts';
 import { useLod } from '../lod.ts';
+import { useNodeCost } from '../costs.ts';
+import { moneyCompact } from '../../lib/money.ts';
+
+/** Costo mensual del nodo (propio + hijos) con la capa de costos activa. */
+export function CostBadge({ id }: { id: string }) {
+  const cost = useNodeCost(id);
+  if (!cost) return null;
+  return (
+    <span className="c4-cost" data-heat={cost.heat} title="Costo mensual estimado (incluye lo que contiene)" data-testid={`cost-${id}`}>
+      {moneyCompact(cost.total, cost.currency)}
+    </span>
+  );
+}
 
 const HANDLES = [
   { id: 't', position: Position.Top },
@@ -118,6 +131,7 @@ function ElementNodeImpl({ data, height, selected }: NodeProps<ElementFlowNode>)
       <div className="c4-node c4-node--far" {...common}>
         <span className="c4-node__stripe" />
         <div className="c4-node__name">{el.name}</div>
+        <CostBadge id={el.id} />
         <Handles />
       </div>
     );
@@ -154,6 +168,7 @@ function ElementNodeImpl({ data, height, selected }: NodeProps<ElementFlowNode>)
         {tall && el.description ? <p className="c4-node__desc">{el.description}</p> : null}
       </div>
       {risk ? <span className="c4-node__risk" data-risk={risk} title={`Riesgo ${RISK_LABEL[risk].toLowerCase()}`} /> : null}
+      <CostBadge id={el.id} />
       <Handles />
     </div>
   );

@@ -1,0 +1,5 @@
+id: app-movil--api-gateway
+from: app-movil
+to: api-gateway
+label: Llama
+protocols: [ https ]

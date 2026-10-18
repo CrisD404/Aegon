@@ -3,7 +3,7 @@ import { NodeResizer, type NodeProps } from '@xyflow/react';
 import { findProvider } from '@aegon/core';
 import { TechIcon } from '@aegon/icons';
 import type { BoundaryFlowNode, GroupFlowNode } from '../derive.ts';
-import { elementIcon } from './ElementNode.tsx';
+import { CostBadge, elementIcon } from './ElementNode.tsx';
 
 function GroupNodeImpl({ data, selected }: NodeProps<GroupFlowNode>) {
   const el = data.element;
@@ -17,6 +17,7 @@ function GroupNodeImpl({ data, selected }: NodeProps<GroupFlowNode>) {
         <TechIcon icon={provider?.icon ?? 'glyph:group'} label={provider?.name} size={14} />
         <span>{el.name}</span>
         {detail ? <span>{detail}</span> : null}
+        <CostBadge id={el.id} />
       </div>
     </div>
   );
@@ -33,6 +34,7 @@ function BoundaryNodeImpl({ data, width, height }: NodeProps<BoundaryFlowNode>) 
         <TechIcon icon={icon} label={label} size={15} />
         {el.name}
         <small>{el.kind === 'system' ? 'Sistema · contenedores' : 'Contenedor · componentes'}</small>
+        <CostBadge id={el.id} />
       </div>
     </div>
   );

@@ -1,0 +1,7 @@
+id: cache
+kind: store
+name: Caché de sesiones
+parent: home-banking
+store:
+  engine: redis
+  type: cache

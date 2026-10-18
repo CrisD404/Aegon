@@ -1,0 +1,4 @@
+id: transfer-controller--core-client
+from: transfer-controller
+to: core-client
+label: Debita / acredita

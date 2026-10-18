@@ -1,0 +1,8 @@
+id: pagos-api
+kind: container
+name: Pagos API
+description: Transferencias y pagos con tarjeta.
+parent: home-banking
+risk: high
+technology: [ go ]
+containerType: service

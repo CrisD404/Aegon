@@ -28,6 +28,7 @@
   color-scheme: light;
   --canvas: #f5f6f8;
   --canvas-dot: rgb(7 9 15 / 0.09);
+  --minimap-mask: rgb(7 9 15 / 0.06);
   --canvas-line: rgb(7 9 15 / 0.05);
   --panel: #ffffff;
   --raised: #f3f4f7;
@@ -84,6 +85,7 @@
   color-scheme: dark;
   --canvas: #07090f;
   --canvas-dot: rgb(255 255 255 / 0.075);
+  --minimap-mask: rgb(0 0 0 / 0.45);
   --canvas-line: rgb(255 255 255 / 0.04);
   --panel: #0c0f16;
   --raised: #121620;

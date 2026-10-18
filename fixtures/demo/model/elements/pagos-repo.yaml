@@ -1,0 +1,5 @@
+id: pagos-repo
+kind: component
+name: Pagos Repository
+parent: pagos-api
+technology: [ go ]

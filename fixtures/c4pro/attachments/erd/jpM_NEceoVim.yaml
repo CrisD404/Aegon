@@ -1,8 +1,0 @@
-body: "{\"source\":\"c4pro-erd-v3\",\"activeViewId\":\"erd-view-default\",\"views\":[{\"id\":\"erd-view-default\",\"name\":\"Main\",\"groups\":[{\"id\":\"erd-group-default\",\"name\":\"Default\",\"color\":\"slate\",\"position\":{\"x\":-43.23664122137404,\"y\":2.6870229007633384},\"width\":940,\"height\":409}],\"schemes\":[{\"id\":\"erd-scheme-default\",\"groupId\":\"erd-group-default\",\"name\":\"public\",\"color\":\"sky\",\"position\":{\"x\":564,\"y\":193},\"width\":360,\"height\":200}],\"entities\":[{\"id\":\"-EHV0X2D1Gxp\",\"schemeId\":\"erd-scheme-default\",\"name\":\"NewEntity\",\"fields\":[{\"id\":\"W9POLiN0XZc-\",\"name\":\"id\",\"type\":\"uuid\",\"isPK\":true,\"nullable\":false},{\"id\":\"bwjCVVycN0yY\",\"name\":\"fieldtest\",\"type\":\"string\",\"nullable\":true}],\"position\":{\"x\":30.351145038167942,\"y\":61.93893129770993}}],\"relations\":[]}]}"
-createdAt: 1778718788111
-id: jpM_NEceoVim
-kind: erd
-metadata: {}
-title: ERD
-updatedAt: 1778718798775
-workspaceId: default-workspace

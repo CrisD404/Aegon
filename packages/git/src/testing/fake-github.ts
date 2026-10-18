@@ -13,12 +13,14 @@ export class FakeGitHub {
   readonly trees = new Map<string, Map<string, string>>(); // tree sha -> (path -> blob sha)
   readonly commits = new Map<string, Commit>();
   readonly refs = new Map<string, string>();
+  readonly owner: string;
+  readonly repo: string;
   private seq = 0;
 
-  constructor(
-    readonly owner = 'acme',
-    readonly repo = 'arquitectura',
-  ) {}
+  constructor(owner = 'acme', repo = 'arquitectura') {
+    this.owner = owner;
+    this.repo = repo;
+  }
 
   private sha(prefix: string) {
     this.seq++;

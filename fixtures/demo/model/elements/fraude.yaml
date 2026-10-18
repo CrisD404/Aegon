@@ -1,0 +1,7 @@
+id: fraude
+kind: component
+name: Motor antifraude
+description: Reglas y scoring en línea.
+parent: pagos-api
+risk: high
+technology: [ go ]

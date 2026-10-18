@@ -1,0 +1,9 @@
+id: eventos
+kind: bus
+name: Eventos de pagos
+description: Eventos de dominio de pagos.
+parent: home-banking
+bus:
+  broker: kafka
+  type: stream
+  topics: [ pagos.autorizados, pagos.rechazados ]

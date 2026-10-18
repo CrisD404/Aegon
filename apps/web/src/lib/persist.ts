@@ -1,5 +1,5 @@
 import { createStore, del, get, set, type UseStore } from 'idb-keyval';
-import type { Model } from '@aegon/core';
+import type { Model, Template } from '@aegon/core';
 
 /**
  * Persistencia local de la app (IndexedDB): registro de workspaces, borradores y handles de
@@ -60,6 +60,9 @@ export const persist = {
       await del(`token:${key}`, db());
     }, undefined);
   },
+  /** Biblioteca de templates del usuario (vale para todos los workspaces de este equipo). */
+  listTemplates: () => safe(async () => (await get<Template[]>('templates', db())) ?? [], []),
+  saveTemplates: (templates: Template[]) => safe(() => set('templates', templates, db()), undefined),
   getDraft: (key: string) => safe(() => get<Model>(`draft:${key}`, db()), undefined),
   setDraft: (key: string, model: Model) => safe(() => set(`draft:${key}`, model, db()), undefined),
   clearDraft: (key: string) => safe(() => del(`draft:${key}`, db()), undefined),

@@ -8,3 +8,6 @@ test-results/
 playwright-report/
 fixtures/large/
 .aegon/
+
+# Resultados de `pnpm bench` (se regeneran en cada corrida)
+apps/web/bench/results.json

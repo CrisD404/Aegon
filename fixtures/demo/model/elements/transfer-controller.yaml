@@ -1,0 +1,6 @@
+id: transfer-controller
+kind: component
+name: Transfer Controller
+description: Endpoints REST de transferencias.
+parent: pagos-api
+technology: [ go ]

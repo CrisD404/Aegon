@@ -7,7 +7,10 @@ const IGNORED_DIRS = new Set(['.git', 'node_modules', '.aegon', 'dist']);
 /** Carpeta del disco vía Node (CLI, servidor MCP y tests). */
 export class NodeFsStorage implements WorkspaceStorage {
   readonly kind = 'folder' as const;
-  constructor(readonly root: string) {}
+  readonly root: string;
+  constructor(root: string) {
+    this.root = root;
+  }
 
   get label() {
     return this.root;
@@ -26,7 +29,7 @@ export class NodeFsStorage implements WorkspaceStorage {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) {
           if (!IGNORED_DIRS.has(entry.name)) await walk(full);
-        } else if (/\.(ya?ml|md|svg|json|txt)$/i.test(entry.name) || entry.name === '.gitignore') {
+        } else if (/\.(ya?ml|md|svg|json|txt)$/i.test(entry.name) || entry.name === '.gitignore' || entry.name === '.gitattributes') {
           out.push(relative(this.root, full).split(sep).join('/'));
         }
       }

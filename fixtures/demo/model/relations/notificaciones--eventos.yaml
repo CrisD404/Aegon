@@ -1,0 +1,5 @@
+id: notificaciones--eventos
+from: notificaciones
+to: eventos
+label: Consume eventos
+protocols: [ kafka ]

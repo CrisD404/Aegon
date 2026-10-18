@@ -143,6 +143,49 @@ export function representativeInView(model: Model, view: View, id: Id): Id | und
   return undefined;
 }
 
+export interface ViewEdge {
+  /** Nodos del lienzo que une (pueden ser ancestros de los extremos reales). */
+  from: Id;
+  to: Id;
+  /** Relaciones del modelo que representa (una si es directa, varias si es implícita). */
+  relations: Relation[];
+  /** True si algún extremo no está ubicado y se dibuja a través de un ancestro. */
+  implied: boolean;
+  bidirectional: boolean;
+}
+
+/**
+ * Relaciones que se ven en un lienzo, una por par de nodos (igual que en el lienzo de la app):
+ * las directas tal cual y las implícitas agrupadas por par, bidireccionales si van en ambos sentidos.
+ */
+export function viewEdges(model: Model, view: View): ViewEdge[] {
+  const out: ViewEdge[] = [];
+  const implied = new Map<string, ViewEdge>();
+  const directPairs = new Set<string>();
+  const pairKey = (a: Id, b: Id) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  for (const rel of Object.values(model.relations).sort((x, y) => x.id.localeCompare(y.id))) {
+    if (view.edges?.[rel.id]?.hidden) continue;
+    const a = representativeInView(model, view, rel.from);
+    const b = representativeInView(model, view, rel.to);
+    if (!a || !b || a === b) continue;
+    const key = pairKey(a, b);
+    if (a === rel.from && b === rel.to) {
+      if (directPairs.has(key)) continue;
+      directPairs.add(key);
+      out.push({ from: a, to: b, relations: [rel], implied: false, bidirectional: rel.direction === 'bidirectional' });
+      continue;
+    }
+    const entry = implied.get(key);
+    if (!entry) implied.set(key, { from: a, to: b, relations: [rel], implied: true, bidirectional: rel.direction === 'bidirectional' });
+    else {
+      entry.relations.push(rel);
+      if (entry.from !== a || rel.direction === 'bidirectional') entry.bidirectional = true;
+    }
+  }
+  for (const [key, entry] of implied) if (!directPairs.has(key)) out.push(entry);
+  return out;
+}
+
 /** Igual que `representativeInView` pero para un lienzo de detalle que todavía no existe. */
 function representativeForScope(model: Model, scope: Id, level: Level, id: Id): Id | undefined {
   const chain = [id, ...ancestorsOf(model, id).map((a) => a.id)];

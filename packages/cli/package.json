@@ -1,0 +1,30 @@
+{
+  "name": "@aegon/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI `aegon`: valida, analiza, edita y exporta workspaces de Aegon desde la terminal (Node 24, TypeScript sin compilar).",
+  "bin": {
+    "aegon": "./src/main.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./workspace": "./src/workspace.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@aegon/core": "workspace:*",
+    "@aegon/format-yaml": "workspace:*",
+    "@aegon/git": "workspace:*",
+    "@aegon/storage": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

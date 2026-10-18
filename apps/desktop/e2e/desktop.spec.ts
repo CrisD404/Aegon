@@ -79,11 +79,12 @@ test.afterAll(async () => {
 
 test('abre un repo, publica, detecta cambios externos y actualiza', async () => {
   test.setTimeout(120_000);
-  // Abrir la carpeta por ruta (paleta → prompt).
-  page.once('dialog', (dialog) => void dialog.accept(work));
+  // Abrir la carpeta por ruta (paleta → modal).
   await page.keyboard.press('Control+k');
   await page.getByTestId('palette-input').fill('Abrir carpeta por ruta');
   await page.keyboard.press('Enter');
+  await page.getByTestId('prompt-input').fill(work);
+  await page.getByTestId('prompt-accept').click();
   await expect(page.getByTestId('sync-indicator')).toContainText('main', { timeout: 20_000 });
   await page.locator('[data-testid="canvas"][data-framed="landscape"]').waitFor();
 

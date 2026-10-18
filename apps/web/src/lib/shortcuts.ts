@@ -26,6 +26,8 @@ export function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ui = useUi.getState();
+      // En modo presentación el reproductor maneja el teclado.
+      if (ui.player) return;
       const ws = useWorkspace.getState();
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
@@ -49,6 +51,13 @@ export function useShortcuts() {
       if (mod && key === 'i') {
         e.preventDefault();
         ui.setPref('rightOpen', !ui.rightOpen);
+        return;
+      }
+      if (mod && key === 'f' && ui.activeViewId) {
+        e.preventDefault();
+        ui.setSearch({ open: true });
+        // Si ya estaba abierta, vuelve a enfocar el campo.
+        requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[data-testid="canvas-search-input"]')?.select());
         return;
       }
       if (typing || ui.paletteOpen || ui.ghost) return;
@@ -118,13 +127,27 @@ export function useShortcuts() {
       }
       if (e.shiftKey && key === 'l') {
         e.preventDefault();
-        arrange();
+        void arrange();
+        return;
+      }
+      if (e.shiftKey && key === 'f') {
+        e.preventDefault();
+        ui.setPref('focusMode', !ui.focusMode);
+        return;
+      }
+      if (e.key === '$') {
+        ui.setPref('costOverlay', !ui.costOverlay);
         return;
       }
       if (e.shiftKey || e.altKey) return;
       if (key === 'f') canvasApi.fit();
       else if (key === 'g') ui.setPref('grid', ui.grid === 'dots' ? 'lines' : ui.grid === 'lines' ? 'none' : 'dots');
       else if (key === 'r') ui.setPref('rulers', !ui.rulers);
+      else if (key === 'm') ui.setPref('minimap', !ui.minimap);
+      else if (key === 'c') {
+        ui.setPref('showComments', true);
+        ui.setCommentMode(!ui.commentMode);
+      } else if (e.key === '$') ui.setPref('costOverlay', !ui.costOverlay);
       else if (key === 'n') canvasApi.ghostAtCenter();
     };
     window.addEventListener('keydown', onKey);

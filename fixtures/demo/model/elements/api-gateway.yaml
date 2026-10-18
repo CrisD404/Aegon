@@ -1,0 +1,7 @@
+id: api-gateway
+kind: container
+name: API Gateway
+description: Autenticación, rate limiting y ruteo.
+parent: home-banking
+technology: [ kong ]
+containerType: api

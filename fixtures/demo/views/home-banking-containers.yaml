@@ -1,0 +1,17 @@
+id: home-banking-containers
+name: Home Banking · Contenedores
+level: 2
+scope: home-banking
+nodes:
+  api-gateway: { x: 160, y: 200 }
+  app-movil: { x: 320, y: 0 }
+  banking-db: { x: 8, y: 600 }
+  cache: { x: 520, y: 200 }
+  cliente: { x: 176, y: -300 }
+  core-bancario: { x: -400, y: 400 }
+  cuentas-api: { x: 0, y: 400 }
+  eventos: { x: 328, y: 600 }
+  notificaciones: { x: 760, y: 600 }
+  pagos-api: { x: 320, y: 400 }
+  pasarela-pagos: { x: 760, y: 400 }
+  web-app: { x: 0, y: 0 }

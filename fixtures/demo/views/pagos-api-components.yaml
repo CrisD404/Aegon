@@ -1,0 +1,12 @@
+id: pagos-api-components
+name: Pagos API · Componentes
+level: 3
+scope: pagos-api
+nodes:
+  api-gateway: { x: 160, y: -260 }
+  banking-db: { x: 168, y: 460 }
+  core-bancario: { x: 488, y: 460 }
+  core-client: { x: 496, y: 200 }
+  fraude: { x: -160, y: 200 }
+  pagos-repo: { x: 168, y: 200 }
+  transfer-controller: { x: 168, y: 0 }

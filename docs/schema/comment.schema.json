@@ -1,0 +1,114 @@
+{
+  "$id": "urn:aegon:schema:v2:comment",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$"
+    },
+    "view": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$"
+    },
+    "x": {
+      "type": "number"
+    },
+    "y": {
+      "type": "number"
+    },
+    "element": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$"
+    },
+    "icon": {
+      "type": "string",
+      "enum": [
+        "message",
+        "info",
+        "question",
+        "warning",
+        "idea",
+        "check",
+        "flag",
+        "bug",
+        "lock",
+        "star"
+      ]
+    },
+    "color": {
+      "type": "string",
+      "enum": [
+        "accent",
+        "ok",
+        "warn",
+        "danger",
+        "violet",
+        "neutral"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1
+    },
+    "author": {
+      "type": "string",
+      "minLength": 1
+    },
+    "at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "edited": {
+      "type": "string"
+    },
+    "resolved": {
+      "type": "boolean"
+    },
+    "replies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string",
+            "minLength": 1
+          },
+          "at": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "author",
+          "at",
+          "body"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "id",
+    "view",
+    "x",
+    "y",
+    "body",
+    "author",
+    "at"
+  ],
+  "additionalProperties": false
+}

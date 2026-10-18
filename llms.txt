@@ -1,0 +1,38 @@
+# Aegon
+
+> Aegon es una herramienta de arquitectura C4 (niveles 1 a 3: contexto, contenedores y componentes) como código. Cada workspace es una carpeta con un YAML por elemento, relación, lienzo, flujo y comentario (formato v2). Incluye una app (web y escritorio), una CLI (`aegon`) y un servidor MCP para que agentes de IA lean y editen el modelo respetando las reglas de C4.
+
+Reglas que conviene saber antes de editar un workspace:
+
+- El modelo (elementos y relaciones) es único; los lienzos solo ubican elementos. Los IDs son slugs inmutables: para renombrar se cambia `name`.
+- Padres válidos: container → system, component → container, store → system o container, bus → system, group → group. Los grupos no tienen relaciones.
+- Una sola relación por par de elementos (`direction: bidirectional` si va en ambos sentidos). Se conectan los elementos más específicos; Aegon deriva las relaciones entre niveles.
+- `technology`, `store.engine`, `bus.broker` y `protocols` usan IDs de catálogo (`java`, `postgresql`, `kafka`, `https`, `jdbc`…).
+- Un flujo (`flows/<id>.yaml`) es una secuencia de pasos (`message`, `process`, `note`, `goto` y bifurcaciones `paths` de un solo nivel) que la app reproduce como presentación; cada `message` usa la relación entre sus extremos. Los pasos se numeran `1, 2, 3` y, dentro de un camino, `3A.1`.
+- Un comentario (`comments/<id>.yaml`) vive en un lienzo, opcionalmente anclado a un elemento (posición relativa a él), con respuestas y estado resuelto.
+
+## Documentación
+
+- [Formato Aegon v2](docs/format.md): estructura de carpetas, campos de cada tipo de elemento, relaciones, lienzos, flujos, comentarios y reglas que valida Aegon.
+- [Aegon para agentes](docs/agents.md): servidor MCP (cómo conectarlo a Claude Code, herramientas para el modelo, los flujos y los comentarios, prompts de ejemplo) y CLI `aegon` (validate, lint, add, connect, layout, diff, export, flows, flow, comments).
+- [Sincronización con git](docs/sync.md): merge semántico por entidad, Commit & push y cambios externos en la app de escritorio.
+- [README](README.md): qué es Aegon, cómo correrlo, atajos y estructura del repo.
+
+## Esquemas
+
+- [workspace.schema.json](docs/schema/workspace.schema.json): `aegon.yaml`.
+- [element.schema.json](docs/schema/element.schema.json): `model/elements/<id>.yaml`.
+- [relation.schema.json](docs/schema/relation.schema.json): `model/relations/<id>.yaml`.
+- [view.schema.json](docs/schema/view.schema.json): `views/<id>.yaml`.
+- [flow.schema.json](docs/schema/flow.schema.json): `flows/<id>.yaml`.
+- [comment.schema.json](docs/schema/comment.schema.json): `comments/<id>.yaml`.
+
+## Ejemplos
+
+- [fixtures/demo](fixtures/demo): workspace de ejemplo (banca digital con L1, L2 y L3), con su `AGENTS.md`. `aegon init --demo` crea el mismo workspace con un flujo (`transferencia`) y dos comentarios.
+
+## Optional
+
+- [packages/core](packages/core/src/index.ts): esquemas zod, operaciones (`Op`) con inversa, reglas, diff/merge semántico, análisis, layout, flujos y exportadores.
+- [packages/mcp](packages/mcp/src/tools.ts): definición de las herramientas MCP.
+- [packages/cli](packages/cli/src/cli.ts): comandos de la CLI; [flows.ts](packages/cli/src/flows.ts) arma los pasos y comentarios que comparten la CLI y el MCP.

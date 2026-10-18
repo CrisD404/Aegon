@@ -20,11 +20,13 @@ import {
  */
 export class CliGitSync implements GitSync {
   readonly kind = 'cli' as const;
+  private readonly git: GitBackend;
+  private readonly storage: WorkspaceStorage;
 
-  constructor(
-    private readonly git: GitBackend,
-    private readonly storage: WorkspaceStorage,
-  ) {}
+  constructor(git: GitBackend, storage: WorkspaceStorage) {
+    this.git = git;
+    this.storage = storage;
+  }
 
   private async run(args: string[], opts: { input?: string; allowFail?: boolean } = {}): Promise<GitResult> {
     const result = await this.git.run(args, opts.input !== undefined ? { input: opts.input } : {});
@@ -60,13 +62,17 @@ export class CliGitSync implements GitSync {
     return { branch, remote: remote || null, label, head, ahead, behind };
   }
 
-  /** Archivos de Aegon en un commit, en una sola llamada a `git cat-file --batch`. */
-  async readFiles(ref: string): Promise<Map<string, string>> {
+  /**
+   * Archivos de Aegon en un commit, en una sola llamada a `git cat-file --batch`. Las rutas son
+   * relativas a la carpeta del workspace, que puede ser una subcarpeta del repo.
+   */
+  async readFiles(ref: string, include: (path: string) => boolean = isAegonFile): Promise<Map<string, string>> {
     const list = await this.run(['ls-tree', '-r', '-z', '--name-only', ref]);
-    const paths = list.stdout.split('\0').filter((p) => p && isAegonFile(p));
+    const paths = list.stdout.split('\0').filter((p) => p && include(p));
     const files = new Map<string, string>();
     if (!paths.length) return files;
-    const batch = await this.run(['cat-file', '--batch'], { input: paths.map((p) => `${ref}:${p}`).join('\n') + '\n' });
+    // `ref:./ruta` resuelve relativo al directorio actual (igual que el listado de ls-tree).
+    const batch = await this.run(['cat-file', '--batch'], { input: paths.map((p) => `${ref}:./${p}`).join('\n') + '\n' });
     // El tamaño del header está en bytes: se parsea sobre los bytes UTF-8.
     const bytes = new TextEncoder().encode(batch.stdout);
     const decoder = new TextDecoder();

@@ -52,12 +52,13 @@ async function pool<T, R>(items: readonly T[], limit: number, fn: (item: T) => P
  */
 export class GitHubSync implements GitSync {
   readonly kind = 'github' as const;
+  readonly target: GitHubTarget;
+  private readonly fetchImpl: Fetch;
   private readonly api: string;
 
-  constructor(
-    readonly target: GitHubTarget,
-    private readonly fetchImpl: Fetch = (...args) => fetch(...args),
-  ) {
+  constructor(target: GitHubTarget, fetchImpl: Fetch = (...args) => fetch(...args)) {
+    this.target = target;
+    this.fetchImpl = fetchImpl;
     this.api = (target.apiUrl ?? 'https://api.github.com').replace(/\/$/, '');
   }
 

@@ -1,0 +1,5 @@
+id: web-app--api-gateway
+from: web-app
+to: api-gateway
+label: Llama
+protocols: [ https ]

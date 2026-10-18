@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   applyOp,
   batch,
+  builtinTemplates,
   diffModels,
   emptyModel,
   isNoop,
@@ -9,19 +10,14 @@ import {
   OpError,
   revertChangeOp,
   slugify,
+  workspaceFromTemplate,
   type Change,
   type Diagnostic,
   type Model,
   type Op,
+  type Template,
 } from '@aegon/core';
-import {
-  importC4Pro,
-  isAegonWorkspace,
-  isC4ProWorkspace,
-  parseWorkspace,
-  planWrite,
-  serializeWorkspace,
-} from '@aegon/format-yaml';
+import { isAegonWorkspace, planWrite } from '@aegon/format-yaml';
 import {
   FolderStorage,
   IdbStorage,
@@ -33,7 +29,6 @@ import {
   type WorkspaceStorage,
 } from '@aegon/storage';
 import { CliGitSync, GitHubSync, type GitHubTarget, type GitSync } from '@aegon/git';
-import { demoModel } from '../lib/demo.ts';
 import { TauriGitBackend, TauriStorage, isDesktop, pickFolderNative, watchFolder } from '../lib/tauri.ts';
 import {
   newKey,
@@ -41,6 +36,7 @@ import {
   setLastWorkspaceKey,
   type WorkspaceRecord,
 } from '../lib/persist.ts';
+import { parseFiles, serializeModel } from '../lib/yaml.ts';
 import { useUi } from './ui.ts';
 
 type HistoryEntry =
@@ -189,7 +185,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }
     set({ saving: true });
     try {
-      const next = serializeWorkspace(model, { previous: files });
+      const next = await serializeModel(model, { previous: files });
       const plan = planWrite(files, next);
       await applyWritePlan(storage, plan);
       const updated = new Map(files);
@@ -262,7 +258,7 @@ function withStarterView(model: Model): Model {
 let stopWatching: (() => void) | null = null;
 
 async function activate(record: WorkspaceRecord, storage: WorkspaceStorage, files: Map<string, string>, git: GitSync | null = null) {
-  const { model: base, diagnostics } = parseWorkspace(files);
+  const { model: base, diagnostics } = await parseFiles(files);
   const draft = await persist.getDraft(record.key);
   const model = draft && diffModels(base, draft).length ? draft : base;
   let synced = record.synced ?? null;
@@ -271,7 +267,7 @@ async function activate(record: WorkspaceRecord, storage: WorkspaceStorage, file
     try {
       if (git instanceof CliGitSync) {
         synced = (await git.status()).head;
-        syncBase = synced ? parseWorkspace(await git.readFiles(synced), { validate: false }).model : emptyModel(base.workspace.id, base.workspace.name);
+        syncBase = synced ? (await parseFiles(await git.readFiles(synced), { validate: false })).model : emptyModel(base.workspace.id, base.workspace.name);
       } else {
         // La copia local de un workspace de GitHub siempre es el último commit sincronizado.
         syncBase = base;
@@ -350,14 +346,40 @@ export async function createBrowserWorkspace(name: string, model?: Model): Promi
   const key = newKey();
   const initial = withStarterView(model ?? emptyModel(slugify(name, 'workspace'), name));
   const storage = new IdbStorage(key);
-  const files = serializeWorkspace(initial);
+  const files = await serializeModel(initial);
   await storage.replaceAll(files);
   await activate({ key, name: initial.workspace.name, source: 'browser', openedAt: Date.now() }, storage, files);
 }
 
-export async function createDemoWorkspace() {
-  await createBrowserWorkspace('Banca digital (demo)', demoModel());
+/** Workspace nuevo del navegador, vacío o a partir de un template. */
+export async function createWorkspaceFromTemplate(name: string, template: Template | null): Promise<void> {
+  await createBrowserWorkspace(name, initialModel(name, template));
 }
+
+/** Workspace de ejemplo (template incluido "Banca digital"). */
+export async function createDemoWorkspace() {
+  const demo = builtinTemplates().find((t) => t.kind === 'workspace');
+  if (demo) await createWorkspaceFromTemplate(demo.name, demo);
+}
+
+function initialModel(name: string, template: Template | null): Model {
+  const id = slugify(name, 'workspace');
+  return template ? workspaceFromTemplate(template, { id, name }) : withStarterView(emptyModel(id, name));
+}
+
+/** Preguntas al usuario en los flujos de carpetas. Los modales los registra la UI (lib/flows.tsx). */
+export const folderPrompts = {
+  initFolder: async (_folder: string): Promise<{ template: Template | null } | null> => null,
+  confirmReplace: async (_folder: string, _workspaceName: string): Promise<boolean> => false,
+};
+
+/** Carpeta sin workspace: pregunta si crear uno (vacío o desde un template). Null si se cancela. */
+async function askInitModel(folder: string): Promise<Model | null> {
+  const choice = await folderPrompts.initFolder(folder);
+  return choice ? initialModel(folder, choice.template) : null;
+}
+
+const confirmReplace = (folder: string, workspaceName: string) => folderPrompts.confirmReplace(folder, workspaceName);
 
 /** Workspace sintético de ~5k elementos para probar escala (paleta de comandos). */
 export async function createLargeWorkspace() {
@@ -367,7 +389,6 @@ export async function createLargeWorkspace() {
   useUi.getState().toast(`Workspace de escala listo en ${Math.round(performance.now() - t0)} ms`, 'success');
 }
 
-/** Abre una carpeta local: workspace de Aegon, repo de C4Pro (importa) o carpeta nueva (inicializa). */
 async function desktopGit(path: string, storage: WorkspaceStorage): Promise<GitSync | null> {
   const git = new CliGitSync(new TauriGitBackend(path), storage);
   return (await git.isRepo()) ? git : null;
@@ -386,14 +407,9 @@ export async function openDesktopPath(path: string): Promise<void> {
   let files = await readAll(storage);
   const name = storage.label;
   if (!isAegonWorkspace(files)) {
-    if (isC4ProWorkspace(files)) {
-      if (!window.confirm(`"${name}" es un repo de C4Pro. ¿Importarlo como un workspace nuevo? La carpeta original no se modifica.`)) return;
-      await importFiles(files);
-      return;
-    }
-    if (!window.confirm(`"${name}" no tiene un workspace de Aegon. ¿Crear uno nuevo en esta carpeta?`)) return;
-    const model = withStarterView(emptyModel(slugify(name, 'workspace'), name));
-    await applyWritePlan(storage, planWrite(files, serializeWorkspace(model, { previous: files })));
+    const model = await askInitModel(name);
+    if (!model) return;
+    await applyWritePlan(storage, planWrite(files, await serializeModel(model, { previous: files })));
     files = await readAll(storage);
   }
   const recents = await persist.listWorkspaces();
@@ -423,47 +439,13 @@ export async function openFolder(): Promise<void> {
     await activate({ key, name: handle.name, source: 'folder', folderName: handle.name, openedAt: Date.now() }, storage, files);
     return;
   }
-  if (isC4ProWorkspace(files)) {
-    if (!window.confirm(`"${handle.name}" es un repo de C4Pro. ¿Importarlo como un workspace nuevo? La carpeta original no se modifica.`)) return;
-    await importFiles(files);
-    return;
-  }
-  if (!window.confirm(`"${handle.name}" no tiene un workspace de Aegon. ¿Crear uno nuevo en esta carpeta?`)) return;
-  const model = withStarterView(emptyModel(slugify(handle.name, 'workspace'), handle.name));
-  const next = serializeWorkspace(model, { previous: files });
+  const model = await askInitModel(handle.name);
+  if (!model) return;
+  const next = await serializeModel(model, { previous: files });
   await applyWritePlan(storage, planWrite(files, next));
   const key = newKey();
   await persist.setHandle(key, handle);
   await activate({ key, name: model.workspace.name, source: 'folder', folderName: handle.name, openedAt: Date.now() }, storage, await readAll(storage));
-}
-
-async function importFiles(files: Map<string, string>) {
-  const { model, diagnostics } = importC4Pro(files);
-  await createBrowserWorkspace(model.workspace.name, model);
-  const warnings = diagnostics.length;
-  useUi.getState().toast(
-    `Importado desde C4Pro${warnings ? ` · ${warnings} avisos` : ''}. Vinculalo a una carpeta para guardarlo como código.`,
-    warnings ? 'info' : 'success',
-  );
-}
-
-export async function importC4ProFolder(): Promise<void> {
-  if (!isFsAccessSupported()) {
-    useUi.getState().toast('Tu navegador no permite abrir carpetas. Usá Chrome o Edge.', 'error');
-    return;
-  }
-  let handle: FileSystemDirectoryHandle;
-  try {
-    handle = await pickDirectory();
-  } catch {
-    return;
-  }
-  const files = await readAll(new FolderStorage(handle));
-  if (!isC4ProWorkspace(files)) {
-    useUi.getState().toast('La carpeta no parece un repo de C4Pro (falta workspace.yaml / elements/).', 'error');
-    return;
-  }
-  await importFiles(files);
 }
 
 /** Pasa el workspace actual del navegador a una carpeta local (escribe lo guardado; el borrador sigue como borrador). */
@@ -483,8 +465,8 @@ export async function linkToFolder(): Promise<void> {
   }
   const storage = new FolderStorage(handle);
   const existing = await readAll(storage);
-  if (isAegonWorkspace(existing) && !window.confirm(`"${handle.name}" ya tiene un workspace de Aegon. ¿Reemplazarlo con "${state.base.workspace.name}"?`)) return;
-  const next = serializeWorkspace(state.base, { previous: existing });
+  if (isAegonWorkspace(existing) && !(await confirmReplace(handle.name, state.base.workspace.name))) return;
+  const next = await serializeModel(state.base, { previous: existing });
   await applyWritePlan(storage, planWrite(existing, next));
   await persist.setHandle(state.record.key, handle);
   const record: WorkspaceRecord = { ...state.record, source: 'folder', folderName: handle.name, openedAt: Date.now() };
@@ -578,7 +560,7 @@ export async function adoptSynced(next: { model: Model; files: Map<string, strin
   const { record, storage } = state;
   if (!record || !storage) return;
   if (storage instanceof IdbStorage) await storage.replaceAll(next.files);
-  const base = next.base ?? parseWorkspace(next.files, { validate: false }).model;
+  const base = next.base ?? (await parseFiles(next.files, { validate: false })).model;
   const updated: WorkspaceRecord = { ...record, synced: next.head };
   await persist.saveWorkspace(updated);
   useWorkspace.setState({ record: updated, files: next.files, base, model: next.model, syncBase: next.syncBase, synced: next.head });
@@ -612,7 +594,7 @@ export async function reloadFromDisk(): Promise<void> {
   const disk = await readAll(storage);
   const same = disk.size === files.size && [...disk].every(([p, c]) => files.get(p)?.replace(/\r\n/g, '\n') === c.replace(/\r\n/g, '\n'));
   if (same) return;
-  const parsed = parseWorkspace(disk);
+  const parsed = await parseFiles(disk);
   const result = mergeModels(base, model, parsed.model);
   useWorkspace.setState({ files: disk, base: parsed.model, model: result.merged, diagnostics: parsed.diagnostics });
   const ui = useUi.getState();
@@ -621,7 +603,7 @@ export async function reloadFromDisk(): Promise<void> {
   if (state.git instanceof CliGitSync) {
     const head = (await state.git.status()).head;
     if (head !== state.synced) {
-      const syncBase = head ? parseWorkspace(await state.git.readFiles(head), { validate: false }).model : null;
+      const syncBase = head ? (await parseFiles(await state.git.readFiles(head), { validate: false })).model : null;
       useWorkspace.setState({ synced: head, syncBase });
     }
   }
@@ -635,8 +617,8 @@ async function linkToFolderDesktop(): Promise<void> {
   if (!path) return;
   const storage = new TauriStorage(path);
   const existing = await readAll(storage);
-  if (isAegonWorkspace(existing) && !window.confirm(`La carpeta ya tiene un workspace de Aegon. ¿Reemplazarlo con "${state.base.workspace.name}"?`)) return;
-  await applyWritePlan(storage, planWrite(existing, serializeWorkspace(state.base, { previous: existing })));
+  if (isAegonWorkspace(existing) && !(await confirmReplace(storage.label, state.base.workspace.name))) return;
+  await applyWritePlan(storage, planWrite(existing, await serializeModel(state.base, { previous: existing })));
   const record: WorkspaceRecord = { ...state.record, source: 'desktop', path, folderName: storage.label, openedAt: Date.now() };
   // El borrador viaja con el workspace (misma clave).
   await activate(record, storage, await readAll(storage), await desktopGit(path, storage));

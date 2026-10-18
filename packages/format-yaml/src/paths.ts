@@ -8,15 +8,19 @@ export const GITATTRIBUTES_PATH = '.gitattributes';
 export const ELEMENTS_DIR = 'model/elements/';
 export const RELATIONS_DIR = 'model/relations/';
 export const VIEWS_DIR = 'views/';
+export const FLOWS_DIR = 'flows/';
+export const COMMENTS_DIR = 'comments/';
 export const ATTACHMENTS_DIR = 'attachments/';
 
 export const elementPath = (id: Id) => `${ELEMENTS_DIR}${id}.yaml`;
 export const relationPath = (id: Id) => `${RELATIONS_DIR}${id}.yaml`;
 export const viewPath = (id: Id) => `${VIEWS_DIR}${id}.yaml`;
+export const flowPath = (id: Id) => `${FLOWS_DIR}${id}.yaml`;
+export const commentPath = (id: Id) => `${COMMENTS_DIR}${id}.yaml`;
 
 export type EntityFile =
   | { type: 'manifest' }
-  | { type: 'element' | 'relation' | 'view'; id: Id }
+  | { type: 'element' | 'relation' | 'view' | 'flow' | 'comment'; id: Id }
   | { type: 'passthrough' };
 
 function idFromFile(path: string, dir: string): Id | null {
@@ -35,6 +39,10 @@ export function classifyPath(path: string): EntityFile | null {
   if (rel) return { type: 'relation', id: rel };
   const view = idFromFile(path, VIEWS_DIR);
   if (view) return { type: 'view', id: view };
+  const flow = idFromFile(path, FLOWS_DIR);
+  if (flow) return { type: 'flow', id: flow };
+  const comment = idFromFile(path, COMMENTS_DIR);
+  if (comment) return { type: 'comment', id: comment };
   if (path.startsWith(ATTACHMENTS_DIR)) return { type: 'passthrough' };
   return null;
 }

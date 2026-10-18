@@ -1,5 +1,5 @@
 import { ancestorsOf, indexOf, type Model } from '../model/index.ts';
-import type { Element, ElementKind, Id, NodeLayout, Relation, View } from '../schema/index.ts';
+import type { Comment, Element, ElementKind, Flow, Id, NodeLayout, Relation, View } from '../schema/index.ts';
 import { KIND_LABEL } from '../ops/commands.ts';
 import type { Op } from '../ops/index.ts';
 
@@ -8,7 +8,7 @@ import type { Op } from '../ops/index.ts';
  * operaciones), así "agregado y luego eliminado" no aparece como cambio.
  */
 
-export type EntityType = 'workspace' | 'element' | 'relation' | 'view';
+export type EntityType = 'workspace' | 'element' | 'relation' | 'view' | 'flow' | 'comment';
 export type ChangeKind = 'added' | 'removed' | 'modified';
 
 export interface FieldChange {
@@ -123,7 +123,15 @@ function layoutSummary(before: View, after: View): LayoutSummary {
 }
 
 const KIND_ORDER: Record<ChangeKind, number> = { added: 0, modified: 1, removed: 2 };
-const ENTITY_ORDER: Record<EntityType, number> = { workspace: 0, element: 1, relation: 2, view: 3 };
+const ENTITY_ORDER: Record<EntityType, number> = { workspace: 0, element: 1, relation: 2, view: 3, flow: 4, comment: 5 };
+const EMPTY: Readonly<Record<Id, never>> = Object.freeze({});
+
+/** Nombre corto de un comentario: su título o el comienzo del texto. */
+export function commentLabel(comment: Comment): string {
+  if (comment.title) return comment.title;
+  const text = comment.body.replace(/\s+/g, ' ').trim();
+  return text.length > 40 ? `${text.slice(0, 39)}…` : text;
+}
 
 export function diffModels(base: Model, current: Model): Change[] {
   const out: Change[] = [];
@@ -167,6 +175,9 @@ export function diffModels(base: Model, current: Model): Change[] {
     }
   }
 
+  out.push(...diffRecords<Flow>('flow', base.flows ?? EMPTY, current.flows ?? EMPTY, (f) => f.name));
+  out.push(...diffRecords<Comment>('comment', base.comments ?? EMPTY, current.comments ?? EMPTY, commentLabel));
+
   return out.sort(
     (a, b) =>
       ENTITY_ORDER[a.entity] - ENTITY_ORDER[b.entity] ||
@@ -193,6 +204,8 @@ export function entityLabel(change: Change): string {
   if (change.entity === 'element') return KIND_LABEL[change.elementKind ?? 'system'];
   if (change.entity === 'relation') return 'Relación';
   if (change.entity === 'view') return 'Lienzo';
+  if (change.entity === 'flow') return 'Flujo';
+  if (change.entity === 'comment') return 'Comentario';
   return 'Workspace';
 }
 
@@ -328,6 +341,16 @@ export function revertChangeOp(base: Model, current: Model, change: Change): Op 
         }
       }
       return { type: 'batch', ops, label: `Restaurar lienzo ${change.name}` };
+    }
+    case 'flow': {
+      if (change.kind === 'added') return { type: 'flow.remove', id };
+      if (change.kind === 'removed') return { type: 'flow.add', flow: base.flows![id]! };
+      return { type: 'flow.update', id, patch: patchToBase(base.flows![id], current.flows![id]!) };
+    }
+    case 'comment': {
+      if (change.kind === 'added') return { type: 'comment.remove', id };
+      if (change.kind === 'removed') return { type: 'comment.add', comment: base.comments![id]! };
+      return { type: 'comment.update', id, patch: patchToBase(base.comments![id], current.comments![id]!) };
     }
   }
 }

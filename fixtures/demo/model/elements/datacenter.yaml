@@ -1,0 +1,6 @@
+id: datacenter
+kind: group
+name: Datacenter central
+group:
+  provider: onprem
+  region: Buenos Aires

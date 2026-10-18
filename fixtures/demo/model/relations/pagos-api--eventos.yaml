@@ -1,0 +1,5 @@
+id: pagos-api--eventos
+from: pagos-api
+to: eventos
+label: Publica pagos
+protocols: [ kafka ]

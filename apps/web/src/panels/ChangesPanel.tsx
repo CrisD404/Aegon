@@ -7,6 +7,7 @@ import { useSync } from '../store/sync.ts';
 import { useUi } from '../store/ui.ts';
 import { isDesktop } from '../lib/tauri.ts';
 import { revealElement } from '../lib/actions.ts';
+import { discardChangesFlow } from '../lib/flows.tsx';
 import { Button, IconButton, Tip, cn } from '../ui/primitives.tsx';
 
 const BADGE: Record<Change['kind'], { letter: string; color: string; title: string }> = {
@@ -45,7 +46,6 @@ export function ChangesPanel() {
   const diagnostics = useWorkspace((s) => s.diagnostics);
   const saving = useWorkspace((s) => s.saving);
   const save = useWorkspace((s) => s.save);
-  const discardAll = useWorkspace((s) => s.discardAll);
   const git = useWorkspace((s) => s.git);
   const unsaved = useUnsaved();
   const message = useMemo(() => commitMessage(changes), [changes]);
@@ -120,9 +120,8 @@ export function ChangesPanel() {
           <button
             type="button"
             className="mt-2 text-[11.5px] text-fg-subtle hover:text-danger"
-            onClick={() => {
-              if (window.confirm(`¿Descartar ${changes.length} ${changes.length === 1 ? 'cambio' : 'cambios'}? Podés deshacerlo con Ctrl+Z.`)) discardAll();
-            }}
+            onClick={() => void discardChangesFlow()}
+            data-testid="discard-all"
           >
             Descartar todos los cambios
           </button>

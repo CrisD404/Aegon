@@ -1,0 +1,7 @@
+id: web-app
+kind: container
+name: Web App
+description: SPA para clientes.
+parent: home-banking
+technology: [ react, typescript ]
+containerType: web

@@ -1,4 +1,4 @@
-import type { Element, ElementKind, Id, Relation, View, WorkspaceMeta } from '../schema/index.ts';
+import type { Comment, Element, ElementKind, Flow, Id, Relation, View, WorkspaceMeta } from '../schema/index.ts';
 import { SCHEMA_VERSION } from '../schema/index.ts';
 
 /**
@@ -10,8 +10,12 @@ export interface Model {
   elements: Readonly<Record<Id, Element>>;
   relations: Readonly<Record<Id, Relation>>;
   views: Readonly<Record<Id, View>>;
+  /** Flujos (secuencias de pasos). Opcional: sin flujos el campo no está. */
+  flows?: Readonly<Record<Id, Flow>>;
+  /** Comentarios sobre los lienzos. Opcional como `flows`. */
+  comments?: Readonly<Record<Id, Comment>>;
   /**
-   * Archivos que Aegon conserva sin interpretar (ej. `attachments/` importados de C4Pro).
+   * Archivos que Aegon conserva sin interpretar (ej. `attachments/`).
    * Clave: ruta relativa POSIX.
    */
   passthrough?: Readonly<Record<string, string>>;

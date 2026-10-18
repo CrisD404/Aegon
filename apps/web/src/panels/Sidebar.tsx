@@ -16,6 +16,7 @@ import {
 } from '@aegon/core';
 import { Glyph, TechIcon } from '@aegon/icons';
 import { useUi, type SidebarTab } from '../store/ui.ts';
+import { FlowsPanel } from './FlowsPanel.tsx';
 import { useWorkspace } from '../store/workspace.ts';
 import { createView, deleteElement, deleteView, drillInto, renameView, revealElement, setDefaultView } from '../lib/actions.ts';
 import { elementIcon } from '../canvas/nodes/ElementNode.tsx';
@@ -180,6 +181,7 @@ export function Sidebar() {
             ['model', 'Modelo'],
             ['groups', 'Grupos'],
             ['views', 'Lienzos'],
+            ['flows', 'Flujos'],
           ] as [SidebarTab, string][]
         ).map(([id, label]) => (
           <button
@@ -202,7 +204,8 @@ export function Sidebar() {
         ) : null}
       </div>
 
-      <div className="flex shrink-0 flex-col gap-2 px-2.5 pt-2.5 pb-1.5">
+      {tab === 'flows' ? <FlowsPanel /> : null}
+      <div className={cn('flex shrink-0 flex-col gap-2 px-2.5 pt-2.5 pb-1.5', tab === 'flows' && 'hidden')}>
         <div className="relative">
           <Search size={13} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-fg-subtle" />
           <input
@@ -233,7 +236,7 @@ export function Sidebar() {
         ) : null}
       </div>
 
-      <div ref={parentRef} className="min-h-0 flex-1 overflow-auto px-1.5 pb-2">
+      <div ref={parentRef} className={cn('min-h-0 flex-1 overflow-auto px-1.5 pb-2', tab === 'flows' && 'hidden')}>
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualizer.getVirtualItems().map((item) => {
             const row = rows[item.index]!;
@@ -257,7 +260,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      {selected && tab !== 'views' ? <Dependencies el={selected} /> : null}
+      {selected && tab !== 'views' && tab !== 'flows' ? <Dependencies el={selected} /> : null}
     </div>
   );
 }

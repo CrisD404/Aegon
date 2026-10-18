@@ -1,0 +1,4 @@
+id: operador--core-bancario
+from: operador
+to: core-bancario
+label: Consulta clientes

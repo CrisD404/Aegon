@@ -1,0 +1,5 @@
+id: pagos-repo--banking-db
+from: pagos-repo
+to: banking-db
+label: Lee y escribe
+protocols: [ jdbc ]

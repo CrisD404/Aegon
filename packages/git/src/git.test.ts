@@ -19,10 +19,12 @@ class Person {
   current!: Model;
   files = new Map<string, string>();
   synced: string | null = null;
-  constructor(
-    readonly sync: GitSync,
-    readonly storage?: NodeFsStorage,
-  ) {}
+  readonly sync: GitSync;
+  readonly storage?: NodeFsStorage;
+  constructor(sync: GitSync, storage?: NodeFsStorage) {
+    this.sync = sync;
+    this.storage = storage;
+  }
 
   async load() {
     this.files = this.storage ? await readAll(this.storage) : this.files;

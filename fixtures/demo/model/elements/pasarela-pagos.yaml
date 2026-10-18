@@ -1,0 +1,6 @@
+id: pasarela-pagos
+kind: system
+name: Pasarela de pagos
+description: Procesador externo de tarjetas.
+scope: external
+risk: medium

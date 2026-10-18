@@ -43,6 +43,7 @@ import { deleteElement, drillInto, removeSelectionFromView, renameView } from '.
 import { IMPLIED_PREFIX } from '../canvas/derive.ts';
 import { elementIcon, kindCaption } from '../canvas/nodes/ElementNode.tsx';
 import { Button, Field, IconButton, SectionTitle, Segmented, Select, Switch, TagInput, TextArea, TextInput, cn, type Suggestion } from '../ui/primitives.tsx';
+import { FinOpsFields } from './FinOpsFields.tsx';
 
 export function Inspector() {
   const model = useWorkspace((s) => s.model);
@@ -239,6 +240,8 @@ function ElementInspector({ el }: { el: Element }) {
           placeholder="pci, core, legacy…"
         />
       </Field>
+
+      <FinOpsFields el={el} update={update} />
 
       <LinksField el={el} update={update} />
 

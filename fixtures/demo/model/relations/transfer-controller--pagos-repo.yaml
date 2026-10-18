@@ -1,0 +1,4 @@
+id: transfer-controller--pagos-repo
+from: transfer-controller
+to: pagos-repo
+label: Persiste

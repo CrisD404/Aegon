@@ -43,6 +43,8 @@ const ENTITY_LABEL: Record<MergeConflict['entity'], string> = {
   element: 'Elemento',
   relation: 'Relación',
   view: 'Lienzo',
+  flow: 'Flujo',
+  comment: 'Comentario',
   workspace: 'Workspace',
   file: 'Archivo',
 };

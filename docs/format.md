@@ -12,6 +12,8 @@ mi-arquitectura/
 │  ├─ elements/<id>.yaml       # actor | system | container | component | store | bus | group
 │  └─ relations/<id>.yaml
 ├─ views/<id>.yaml             # lienzos: nivel, scope, posiciones y estilo de relaciones
+├─ flows/<id>.yaml             # flujos: pasos que se reproducen como presentación
+├─ comments/<id>.yaml          # comentarios sobre los lienzos
 ├─ attachments/                # archivos que Aegon conserva sin interpretar
 └─ .aegon/                     # estado local (en .gitignore)
 ```
@@ -29,8 +31,8 @@ desde los esquemas zod de `@aegon/core`).
   un componente). Los grupos (cloud, red, on-prem) son elementos y la membresía va en `groups`.
 - **Sin ruido.** No hay `createdAt`/`updatedAt` (git ya guarda la historia), los campos con valor
   por defecto se omiten y las claves siempre salen en el mismo orden.
-- **Nada se pierde.** Lo que Aegon no modela todavía va en `extensions` (por ejemplo FinOps
-  importado de C4Pro) y los adjuntos se conservan tal cual.
+- **Nada se pierde.** Lo que Aegon no modela todavía va en `extensions` (por ejemplo datos de
+  otras herramientas) y los archivos que no reconoce, como `attachments/`, se conservan tal cual.
 
 ## Elementos
 
@@ -133,22 +135,126 @@ edges:              # solo las relaciones con estilo distinto del default
 Un archivo con YAML inválido o que no cumple el esquema se reporta (con su ruta) y se omite: el
 resto del workspace abre igual.
 
-## Importar desde C4Pro
+## Ambientes y costos (FinOps)
 
-`Importar repo de C4Pro…` (o abrir una carpeta de C4Pro) convierte el formato anterior:
+Los ambientes y la configuración de costos viven en el manifiesto. El orden de `environments` es el
+de la interfaz y el de los costos en cada archivo:
 
-| C4Pro | Aegon v2 |
-|---|---|
-| `elements/*.yaml` con `type: app` | `container` |
-| `type: queue` | `bus` |
-| `groupKind` | `group.provider` |
-| tag `risk:x` | `risk` |
-| `displayDescription` / `detailedDescription` | `description` / `docs` |
-| `status: future` | `status: planned` |
-| `diagrams/*.yaml` | `views/*.yaml` (`layout[]` → `nodes{}`, `scopeElementId` → `scope`) |
-| `connections/*.yaml` | `relations/*.yaml` (la forma pasa al estilo del edge de cada lienzo; las repetidas se fusionan y las inversas quedan bidireccionales) |
-| costos, FinOps, ambientes | `extensions.c4pro` |
-| `attachments/`, `workspace-logo.svg` | `attachments/` sin cambios |
+```yaml
+# aegon.yaml
+environments:
+  - { id: dev, name: Desarrollo }
+  - { id: qa, name: QA }
+  - { id: prod, name: Producción }
+finops:
+  currency: USD                    # ISO 4217; por defecto USD
+  tagKeys: [ cost-center, project ] # etiquetas que se sugieren al cargar costos
+  budgets:                         # presupuesto mensual por ambiente
+    prod: 9000
+```
 
-`parent` se infiere de los diagramas L2/L3 y la membresía a grupos de la contención visual en cada
-diagrama. Se conservan los IDs originales.
+Cada elemento (salvo los actores) puede indicar dónde está desplegado y cuánto cuesta por mes:
+
+```yaml
+# model/elements/cuentas-api.yaml
+environments: [ qa, prod ]          # sin el campo: desplegado en todos los ambientes
+finops:
+  costs:
+    qa: { monthly: 90 }
+    prod: { monthly: 980, replicas: 4, sku: m6i.large, note: Reservadas a 1 año }
+  tags:
+    cost-center: CC-1200
+```
+
+- `monthly` es el costo mensual estimado en la moneda del workspace; `replicas`, `sku` y `note` son
+  opcionales. Un costo cargado para un ambiente donde el elemento no está desplegado no se suma.
+- Los totales se acumulan por jerarquía: un sistema suma sus contenedores y componentes. Un grupo
+  (cuenta cloud, datacenter) suma a sus miembros y lo que contienen, sin contar dos veces, más su
+  costo propio (red, servicios compartidos).
+- Las etiquetas de `finops.tags` se heredan: un contenedor sin `cost-center` usa el de su sistema.
+- La app muestra los costos en el lienzo (capa de costos, filtrable por ambiente), en el inspector
+  y en el panel **Costos** (por ambiente contra presupuesto, por sistema, grupo y etiqueta), y los
+  exporta a CSV (una fila por elemento y ambiente).
+- Aegon avisa si un elemento usa un ambiente que no está definido en `aegon.yaml`.
+
+## Flujos
+
+Un flujo cuenta cómo viaja un pedido por la arquitectura: quién le habla a quién, en qué orden y
+qué pasa si algo falla. La app lo reproduce como una presentación: la cámara enfoca los elementos
+de cada paso (y abre el lienzo L2 o L3 que los muestra), la relación del mensaje se anima en su
+sentido y el resto queda atenuado.
+
+```yaml
+# flows/transferencia.yaml
+id: transferencia
+name: Transferencia desde la app
+description: Desde que el cliente confirma hasta que recibe la notificación.
+view: home-banking-containers       # lienzo donde se reproduce
+steps:
+  - type: message                   # un elemento le habla a otro
+    from: app-movil
+    to: api-gateway
+    title: POST /transferencias
+    description: "Body: `{ origen, destino, importe }`"
+  - type: process                   # un elemento hace algo por su cuenta
+    element: fraude
+    title: Evalúa el riesgo
+  - type: paths                     # bifurcación
+    mode: alternate                 # alternate: uno u otro · parallel: todos a la vez
+    title: ¿Se aprueba?
+    paths:
+      - name: Aprobada
+        steps:
+          - { type: message, from: pagos-api, to: eventos, title: Publica pagos.autorizados }
+      - name: Rechazada
+        steps:
+          - { type: message, from: pagos-api, to: eventos, title: Publica pagos.rechazados }
+  - type: goto                      # continúa en otro flujo (y vuelve)
+    flow: notificar-cliente
+  - type: note                      # contexto sin elementos
+    title: Fin
+```
+
+- Un `message` usa la relación entre `from` y `to` (o la indicada en `relation`); si no hay
+  relación, se dibuja una flecha temporal. Los pasos se numeran `1, 2, 3`; dentro de un camino,
+  `3A.1`, `3B.2`.
+- Los caminos tienen un solo nivel (un camino no contiene otra bifurcación).
+- Aegon avisa si un paso apunta a un elemento, relación o flujo que no existe.
+
+## Comentarios
+
+Notas, preguntas o advertencias sobre un lienzo, con respuestas. Viajan con el workspace (y con
+git), así las ve todo el equipo.
+
+```yaml
+# comments/c-mgz1k2ab.yaml
+id: c-mgz1k2ab
+view: home-banking-containers
+element: banking-db                 # anclado: se mueve con el elemento (x, y relativos)
+x: 196
+y: -14
+icon: question                      # message, info, question, warning, idea, check, flag, bug, lock, star
+color: violet                       # accent, ok, warn, danger, violet, neutral
+title: Costo de la base             # opcional
+body: ¿Migramos a Aurora Serverless?
+author: Arquitectura
+at: 2026-10-15T14:20:00.000Z
+resolved: true                      # opcional
+replies:
+  - { author: Equipo Canales, at: 2026-10-16T09:05:00.000Z, body: Lo evaluamos el próximo trimestre. }
+```
+
+## Templates
+
+Un template es un modelo de Aegon reutilizable. Hay dos tipos:
+
+- **Workspace**: un workspace completo (por ejemplo, el de ejemplo "Banca digital"). Sirve para
+  crear un workspace nuevo o para inicializar una carpeta vacía.
+- **Bloque**: un grupo de elementos con sus relaciones y su layout relativo (un API gateway con su
+  proveedor de identidad, un productor y consumidores de Kafka…). Se inserta en un lienzo del nivel
+  que corresponde: los IDs se generan de nuevo, los containers y componentes toman como `parent` el
+  elemento que abre el lienzo y se copian los lienzos internos del bloque.
+
+Los templates incluidos vienen con la app. Los que guarda el usuario ("Guardar como template…"
+sobre una selección o sobre el workspace) quedan en la biblioteca local del navegador o de la app de
+escritorio; no forman parte de los archivos del workspace.

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Formato Aegon v2: serializa/parsea un workspace como archivos YAML (un archivo por entidad) e importa repos de C4Pro.",
+  "description": "Formato Aegon v2: serializa/parsea un workspace como archivos YAML (un archivo por entidad).",
   "exports": {
     ".": "./src/index.ts"
   },

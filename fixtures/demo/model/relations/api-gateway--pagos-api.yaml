@@ -1,0 +1,5 @@
+id: api-gateway--pagos-api
+from: api-gateway
+to: pagos-api
+label: Rutea
+protocols: [ rest ]

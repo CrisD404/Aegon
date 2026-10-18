@@ -1,0 +1,6 @@
+schema: 2
+id: banca-digital
+name: Banca digital (demo)
+description: Workspace de ejemplo de Aegon.
+organization: Aegon Demo
+defaultView: landscape

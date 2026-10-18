@@ -1,0 +1,5 @@
+id: cuentas-api--core-bancario
+from: cuentas-api
+to: core-bancario
+label: Consulta saldos
+protocols: [ soap ]

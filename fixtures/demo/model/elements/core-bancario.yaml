@@ -1,0 +1,8 @@
+id: core-bancario
+kind: system
+name: Core bancario
+description: Sistema de registro de cuentas y movimientos.
+groups: [ datacenter ]
+scope: external
+risk: critical
+technology: [ dotnet ]

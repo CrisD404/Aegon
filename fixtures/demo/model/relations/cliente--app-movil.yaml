@@ -1,0 +1,4 @@
+id: cliente--app-movil
+from: cliente
+to: app-movil
+label: Opera desde el celular

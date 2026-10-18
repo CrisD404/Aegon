@@ -1,0 +1,4 @@
+id: transfer-controller--fraude
+from: transfer-controller
+to: fraude
+label: Evalúa riesgo

@@ -1,0 +1,8 @@
+id: cuentas-api
+kind: container
+name: Cuentas API
+description: Saldos, movimientos y extractos.
+parent: home-banking
+risk: medium
+technology: [ java, spring-boot ]
+containerType: service

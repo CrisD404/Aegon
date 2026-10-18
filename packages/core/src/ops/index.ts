@@ -1,11 +1,15 @@
 import { indexOf, descendantsOf, ancestorsOf, type Model } from '../model/index.ts';
 import {
+  Comment as CommentSchema,
   Element as ElementSchema,
+  Flow as FlowSchema,
   Relation as RelationSchema,
   View as ViewSchema,
   WorkspaceMeta as WorkspaceSchema,
+  type Comment,
   type EdgeStyle,
   type Element,
+  type Flow,
   type Id,
   type NodeLayout,
   type Relation,
@@ -24,6 +28,8 @@ export type ElementPatch = Patch<DistributiveOmit<Element, 'id' | 'kind'>> & {
 export type RelationPatch = Patch<Omit<Relation, 'id'>>;
 export type ViewPatch = Patch<Pick<View, 'name' | 'description' | 'extensions'>>;
 export type WorkspacePatch = Patch<Omit<WorkspaceMeta, 'schema' | 'id'>>;
+export type FlowPatch = Patch<Omit<Flow, 'id'>>;
+export type CommentPatch = Patch<Omit<Comment, 'id'>>;
 
 /**
  * Toda modificación del modelo es una `Op` serializable a JSON. La misma API la usan la UI,
@@ -43,6 +49,12 @@ export type Op =
   | { type: 'view.unplace'; view: Id; ids: Id[] }
   | { type: 'view.edge'; view: Id; relation: Id; style: EdgeStyle | null }
   | { type: 'workspace.update'; patch: WorkspacePatch }
+  | { type: 'flow.add'; flow: Flow }
+  | { type: 'flow.update'; id: Id; patch: FlowPatch }
+  | { type: 'flow.remove'; id: Id }
+  | { type: 'comment.add'; comment: Comment }
+  | { type: 'comment.update'; id: Id; patch: CommentPatch }
+  | { type: 'comment.remove'; id: Id }
   | { type: 'batch'; ops: Op[]; label?: string };
 
 export type OpType = Op['type'];
@@ -96,6 +108,18 @@ export function applyOp(model: Model, op: Op): ApplyResult {
       return setEdgeStyle(model, op.view, op.relation, op.style);
     case 'workspace.update':
       return updateWorkspace(model, op.patch);
+    case 'flow.add':
+      return addEntry(model, 'flows', op.flow, FlowSchema, 'flow');
+    case 'flow.update':
+      return updateEntry(model, 'flows', op.id, op.patch, FlowSchema, 'flow');
+    case 'flow.remove':
+      return removeEntry(model, 'flows', op.id, 'flow');
+    case 'comment.add':
+      return addEntry(model, 'comments', op.comment, CommentSchema, 'comment');
+    case 'comment.update':
+      return updateEntry(model, 'comments', op.id, op.patch, CommentSchema, 'comment');
+    case 'comment.remove':
+      return removeEntry(model, 'comments', op.id, 'comment');
     case 'batch':
       return applyBatch(model, op.ops, op.label);
   }
@@ -497,12 +521,78 @@ function updateWorkspace(model: Model, patch: WorkspacePatch): ApplyResult {
   };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Flujos y comentarios: colecciones simples (sin cascadas). Las referencias colgantes a elementos
+// o lienzos borrados no bloquean la edición: las reporta `validateModel`.
+
+type Collection = 'flows' | 'comments';
+type Entry<C extends Collection> = C extends 'flows' ? Flow : Comment;
+const ENTRY_LABEL = { flow: 'el flujo', comment: 'el comentario' } as const;
+
+/** Reemplaza una colección opcional del modelo (sin la clave si queda vacía). */
+function withCollection<C extends Collection>(model: Model, key: C, next: Record<Id, Entry<C>>): Model {
+  const out: Record<string, unknown> = { ...model };
+  if (Object.keys(next).length) out[key] = next;
+  else delete out[key];
+  return out as unknown as Model;
+}
+
+function addEntry<C extends Collection>(
+  model: Model,
+  key: C,
+  entry: Entry<C>,
+  schema: { safeParse(v: unknown): { success: true; data: unknown } | { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } } },
+  kind: 'flow' | 'comment',
+): ApplyResult {
+  const parsed = schema.safeParse(entry);
+  if (!parsed.success) throw new OpError(`invalid-${kind}`, formatIssues(parsed.error));
+  const value = parsed.data as Entry<C>;
+  const current = (model[key] ?? {}) as Record<Id, Entry<C>>;
+  if (current[value.id]) throw new OpError('duplicate-id', `Ya existe ${ENTRY_LABEL[kind]} "${value.id}"`);
+  return {
+    model: withCollection(model, key, { ...current, [value.id]: value }),
+    inverse: { type: `${kind}.remove`, id: value.id } as Op,
+  };
+}
+
+function updateEntry<C extends Collection>(
+  model: Model,
+  key: C,
+  id: Id,
+  patch: object,
+  schema: { safeParse(v: unknown): { success: true; data: unknown } | { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } } },
+  kind: 'flow' | 'comment',
+): ApplyResult {
+  const current = (model[key] ?? {}) as Record<Id, Entry<C>>;
+  const prev = current[id];
+  if (!prev) throw new OpError('not-found', `No existe ${ENTRY_LABEL[kind]} "${id}"`);
+  if ('id' in patch) throw new OpError('immutable-field', 'No se puede cambiar el ID');
+  const parsed = schema.safeParse(applyPatch(prev, patch));
+  if (!parsed.success) throw new OpError(`invalid-${kind}`, formatIssues(parsed.error));
+  return {
+    model: withCollection(model, key, { ...current, [id]: parsed.data as Entry<C> }),
+    inverse: { type: `${kind}.update`, id, patch: inversePatch(prev, patch) } as Op,
+  };
+}
+
+function removeEntry<C extends Collection>(model: Model, key: C, id: Id, kind: 'flow' | 'comment'): ApplyResult {
+  const current = (model[key] ?? {}) as Record<Id, Entry<C>>;
+  const prev = current[id];
+  if (!prev) throw new OpError('not-found', `No existe ${ENTRY_LABEL[kind]} "${id}"`);
+  const next = { ...current };
+  delete next[id];
+  return {
+    model: withCollection(model, key, next),
+    inverse: (kind === 'flow' ? { type: 'flow.add', flow: prev } : { type: 'comment.add', comment: prev }) as Op,
+  };
+}
+
 /** True si la operación no tiene efecto (ej. un batch vacío). */
 export function isNoop(op: Op): boolean {
   if (op.type === 'batch') return op.ops.every(isNoop);
   if (op.type === 'view.place') return Object.keys(op.nodes).length === 0;
   if (op.type === 'view.unplace') return op.ids.length === 0;
-  if (op.type === 'element.update' || op.type === 'relation.update' || op.type === 'view.update') {
+  if (op.type === 'element.update' || op.type === 'relation.update' || op.type === 'view.update' || op.type === 'flow.update' || op.type === 'comment.update') {
     return Object.keys(op.patch).length === 0;
   }
   return false;

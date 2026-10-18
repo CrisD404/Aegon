@@ -6,7 +6,13 @@ import { Sidebar } from './panels/Sidebar.tsx';
 import { Inspector } from './panels/Inspector.tsx';
 import { ChangesPanel, useChangeCount } from './panels/ChangesPanel.tsx';
 import { CommandPalette } from './panels/CommandPalette.tsx';
+import { CostsPanel } from './panels/CostsPanel.tsx';
+import { CommentsPanel } from './panels/CommentsPanel.tsx';
 import { ConflictDialog, GitHubDialog } from './panels/SyncDialogs.tsx';
+import { DialogHost } from './panels/Dialogs.tsx';
+import { useTemplates } from './store/templates.ts';
+import { prewarmYamlWorker } from './lib/yaml.ts';
+import { newWorkspaceFlow } from './lib/flows.tsx';
 import './store/sync.ts';
 import { TopBar, Logo } from './panels/TopBar.tsx';
 import { useUi, type RightTab } from './store/ui.ts';
@@ -18,6 +24,8 @@ import { Button, cn } from './ui/primitives.tsx';
 const panelSpring = { type: 'spring', stiffness: 420, damping: 38, mass: 0.8 } as const;
 
 async function boot() {
+  prewarmYamlWorker();
+  void useTemplates.getState().load();
   const records = await persist.listWorkspaces();
   useWorkspace.setState({ recents: records });
   const last = lastWorkspaceKey();
@@ -40,6 +48,7 @@ export function App() {
   const status = useWorkspace((s) => s.status);
   const sidebarOpen = useUi((s) => s.sidebarOpen);
   const rightOpen = useUi((s) => s.rightOpen);
+  const presenting = useUi((s) => !!s.player);
   useShortcuts();
 
   useEffect(() => {
@@ -58,14 +67,20 @@ export function App() {
     [],
   );
 
-  if (status !== 'ready') return <BootScreen />;
+  if (status !== 'ready')
+    return (
+      <>
+        <BootScreen />
+        <DialogHost />
+      </>
+    );
 
   return (
     <div className="flex h-full flex-col bg-canvas">
-      <TopBar />
+      {!presenting ? <TopBar /> : null}
       <div className="flex min-h-0 flex-1">
         <AnimatePresence initial={false}>
-          {sidebarOpen ? (
+          {sidebarOpen && !presenting ? (
             <motion.aside
               key="sidebar"
               initial={{ width: 0, opacity: 0 }}
@@ -84,7 +99,7 @@ export function App() {
           <Canvas />
         </main>
         <AnimatePresence initial={false}>
-          {rightOpen ? (
+          {rightOpen && !presenting ? (
             <motion.aside
               key="right"
               initial={{ width: 0, opacity: 0 }}
@@ -103,6 +118,7 @@ export function App() {
       <CommandPalette />
       <ConflictDialog />
       <GitHubDialog />
+      <DialogHost />
       <Toasts />
     </div>
   );
@@ -112,9 +128,12 @@ function RightPanel() {
   const tab = useUi((s) => s.rightTab);
   const setRightTab = useUi((s) => s.setRightTab);
   const changes = useChangeCount();
+  const openComments = useWorkspace((s) => Object.values(s.model.comments ?? {}).filter((c) => !c.resolved).length);
   const tabs: [RightTab, string][] = [
     ['inspector', 'Inspector'],
     ['changes', 'Cambios'],
+    ['costs', 'Costos'],
+    ['comments', 'Comentarios'],
   ];
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -131,11 +150,12 @@ function RightPanel() {
           >
             {label}
             {id === 'changes' && changes ? <span className="rounded-full bg-warn/15 px-1.5 tabular-nums font-semibold text-[10.5px] leading-4 text-warn">{changes}</span> : null}
+            {id === 'comments' && openComments ? <span className="rounded-full bg-accent-soft px-1.5 tabular-nums font-semibold text-[10.5px] leading-4 text-accent">{openComments}</span> : null}
             {tab === id ? <motion.span layoutId="right-tab" className="absolute right-2 bottom-[-1px] left-2 h-[2px] rounded-full bg-accent" /> : null}
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">{tab === 'inspector' ? <Inspector /> : <ChangesPanel />}</div>
+      <div className="min-h-0 flex-1 overflow-auto">{tab === 'inspector' ? <Inspector /> : tab === 'costs' ? <CostsPanel /> : tab === 'comments' ? <CommentsPanel /> : <ChangesPanel />}</div>
     </div>
   );
 }
@@ -200,7 +220,7 @@ function BootScreen() {
               <Button variant="primary" onClick={() => void openRecord(record, { requestPermission: true })}>
                 <FolderOpen size={14} /> Dar permiso
               </Button>
-              <Button onClick={() => void createDemoWorkspace()}>Abrir el ejemplo</Button>
+              <Button onClick={() => void newWorkspaceFlow()}>Nuevo workspace…</Button>
             </div>
           </>
         ) : status === 'error' ? (
@@ -211,8 +231,8 @@ function BootScreen() {
               <Button onClick={() => void openFolder()}>
                 <FolderOpen size={14} /> Abrir carpeta
               </Button>
-              <Button variant="primary" onClick={() => void createDemoWorkspace()}>
-                Abrir el ejemplo
+              <Button variant="primary" onClick={() => void newWorkspaceFlow()}>
+                Nuevo workspace…
               </Button>
             </div>
           </>

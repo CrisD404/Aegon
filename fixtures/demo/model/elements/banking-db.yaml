@@ -1,0 +1,10 @@
+id: banking-db
+kind: store
+name: Banking DB
+description: Clientes, beneficiarios y preferencias.
+parent: home-banking
+store:
+  engine: postgresql
+  type: relational
+  version: "16"
+  managed: aws-rds

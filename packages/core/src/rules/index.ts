@@ -1,5 +1,5 @@
 import { ancestorsOf, hasParentCycle, indexOf, sortedValues, type Model } from '../model/index.ts';
-import type { Element, Id, View } from '../schema/index.ts';
+import type { Element, FlowStep, Id, LeafStep, View } from '../schema/index.ts';
 import {
   KINDS_FOR_LEVEL,
   PARENT_KINDS,
@@ -16,7 +16,7 @@ export interface Diagnostic {
   code: string;
   message: string;
   /** Entidad afectada. */
-  entity?: { type: 'element' | 'relation' | 'view' | 'workspace'; id: Id };
+  entity?: { type: 'element' | 'relation' | 'view' | 'workspace' | 'flow' | 'comment'; id: Id };
   /** Archivo de origen (lo completa el parser de YAML). */
   file?: string;
 }
@@ -114,6 +114,59 @@ export function validateModel(model: Model): Diagnostic[] {
       }
       const problem = placementProblem(model, view, el);
       if (problem) out.push({ severity: 'warning', code: 'invalid-placement', message: `${problem} ("${el.name}" en "${view.name}")`, entity });
+    }
+  }
+
+  // Ambientes y costos: las referencias tienen que apuntar a ambientes del workspace.
+  const wsEntity = { type: 'workspace' as const, id: model.workspace.id };
+  const envIds = new Set<Id>();
+  for (const env of model.workspace.environments ?? []) {
+    if (envIds.has(env.id)) out.push({ severity: 'error', code: 'duplicate-environment', message: `El ambiente "${env.id}" está repetido`, entity: wsEntity });
+    envIds.add(env.id);
+  }
+  for (const env of Object.keys(model.workspace.finops?.budgets ?? {})) {
+    if (!envIds.has(env)) out.push({ severity: 'warning', code: 'unknown-environment', message: `Hay un presupuesto para "${env}", que no es un ambiente del workspace`, entity: wsEntity });
+  }
+  for (const el of sortedValues(model.elements)) {
+    const entity = { type: 'element' as const, id: el.id };
+    const refs = [...(el.environments ?? []), ...Object.keys(el.finops?.costs ?? {})];
+    for (const env of new Set(refs)) {
+      if (!envIds.has(env)) out.push({ severity: 'warning', code: 'unknown-environment', message: `"${el.name}" usa el ambiente "${env}", que no está definido en el workspace`, entity });
+    }
+    if (el.kind === 'actor' && el.finops?.costs) {
+      out.push({ severity: 'warning', code: 'actor-cost', message: `Los actores no tienen costos ("${el.name}")`, entity });
+    }
+  }
+
+  // Flujos: los pasos apuntan a elementos, relaciones y flujos que existan.
+  for (const flow of sortedValues(model.flows ?? {})) {
+    const entity = { type: 'flow' as const, id: flow.id };
+    if (flow.view && !model.views[flow.view]) {
+      out.push({ severity: 'warning', code: 'flow-missing-view', message: `El flujo "${flow.name}" se reproduce en "${flow.view}", que no existe`, entity });
+    }
+    const check = (step: FlowStep | LeafStep, label: string) => {
+      const missing = (id: Id) => out.push({ severity: 'warning', code: 'flow-missing-element', message: `Paso ${label} de "${flow.name}": "${id}" no existe`, entity });
+      if (step.type === 'message') {
+        for (const id of [step.from, step.to]) if (!model.elements[id]) missing(id);
+        if (step.relation && !model.relations[step.relation]) missing(step.relation);
+      } else if (step.type === 'process') {
+        if (!model.elements[step.element]) missing(step.element);
+      } else if (step.type === 'goto') {
+        if (!model.flows?.[step.flow]) missing(step.flow);
+        else if (step.flow === flow.id) out.push({ severity: 'warning', code: 'flow-self-goto', message: `Paso ${label} de "${flow.name}": va al mismo flujo`, entity });
+      } else if (step.type === 'paths') {
+        step.paths.forEach((path, p) => path.steps.forEach((s, j) => check(s, `${label}${String.fromCharCode(65 + p)}.${j + 1}`)));
+      }
+    };
+    flow.steps.forEach((step, i) => check(step, String(i + 1)));
+  }
+  for (const comment of sortedValues(model.comments ?? {})) {
+    const entity = { type: 'comment' as const, id: comment.id };
+    if (!model.views[comment.view]) {
+      out.push({ severity: 'warning', code: 'comment-missing-view', message: `Un comentario está en el lienzo "${comment.view}", que no existe`, entity });
+    }
+    if (comment.element && !model.elements[comment.element]) {
+      out.push({ severity: 'info', code: 'comment-missing-element', message: `Un comentario estaba anclado a "${comment.element}", que ya no existe`, entity });
     }
   }
 

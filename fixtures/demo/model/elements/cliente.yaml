@@ -1,0 +1,5 @@
+id: cliente
+kind: actor
+name: Cliente
+scope: external
+role: Persona o empresa con cuenta

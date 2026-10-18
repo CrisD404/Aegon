@@ -3,7 +3,10 @@ import type { GitBackend, GitResult } from './types.ts';
 
 /** Ejecuta el `git` del sistema con Node (CLI, servidor MCP y tests). */
 export class NodeGitBackend implements GitBackend {
-  constructor(readonly cwd: string) {}
+  readonly cwd: string;
+  constructor(cwd: string) {
+    this.cwd = cwd;
+  }
 
   run(args: string[], opts: { input?: string } = {}): Promise<GitResult> {
     return new Promise((resolve, reject) => {

@@ -621,6 +621,16 @@
   color: var(--fg-subtle);
 }
 
+/*
+ * Viewport en movimiento: sin hover ni hit-testing sobre nodos y relaciones. (No se usa
+ * `will-change: transform` en el viewport: con miles de nodos obliga a rasterizar el lienzo entero
+ * como una sola capa y es mucho más lento que repintar lo visible.)
+ */
+.canvas-shell[data-moving] .react-flow__node,
+.canvas-shell[data-moving] .react-flow__edge {
+  pointer-events: none;
+}
+
 /* Nivel de detalle por zoom (lo setea el lienzo en data-lod) ----------------------------------- */
 
 .c4-node--far {
@@ -687,4 +697,304 @@
 
 .ruler canvas {
   display: block;
+}
+
+/* Minimapa ------------------------------------------------------------------------------------- */
+
+.react-flow__minimap.c4-minimap {
+  /* Arriba a la derecha, debajo de la regla: abajo queda la barra del lienzo. */
+  margin: 40px 16px 0 0;
+  width: 200px;
+  height: 140px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+.c4-minimap .react-flow__minimap-mask {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+/* Resaltado (búsqueda y modo foco): las reglas las genera el lienzo; acá solo la transición. */
+.react-flow__node-element,
+.react-flow__edge,
+.c4-edge-label {
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+
+/* Capa de costos ------------------------------------------------------------------------------- */
+
+.c4-cost {
+  position: absolute;
+  top: -10px;
+  /* A la izquierda del punto de riesgo (arriba a la derecha del nodo). */
+  right: 24px;
+  z-index: 2;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  animation: aegon-pop-in var(--dur-2) var(--ease-out);
+}
+
+.c4-cost[data-heat='2'] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel));
+}
+
+.c4-cost[data-heat='3'] {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+}
+
+/* En los marcos de grupo y del sistema abierto, el costo va junto a la etiqueta. */
+.c4-group__label .c4-cost,
+.c4-boundary__label .c4-cost {
+  position: static;
+  margin-left: 6px;
+  animation: none;
+}
+
+.react-flow[data-lod='far'] .c4-node .c4-cost {
+  transform: scale(var(--lod-scale, 1));
+  transform-origin: right bottom;
+}
+
+/* Elegir en el lienzo (pasos de flujos, comentarios) ------------------------------------------- */
+
+.canvas-shell[data-picking] .react-flow__pane,
+.canvas-shell[data-picking] .react-flow__node {
+  cursor: crosshair !important;
+}
+
+/* Flujos: marcadores de pasos ------------------------------------------------------------------ */
+
+.flow-marker {
+  position: absolute;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 2px solid var(--panel);
+  background: var(--step-color, var(--accent));
+  color: white;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: all;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.2);
+  transform-origin: center;
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out),
+    opacity var(--dur-2) var(--ease-out);
+}
+
+.flow-marker[data-state='idle'] {
+  opacity: 0.85;
+}
+
+.flow-marker[data-state='past'] {
+  background: var(--fg-subtle);
+  opacity: 0.8;
+}
+
+.flow-marker[data-state='selected'],
+.flow-marker[data-state='current'] {
+  z-index: 7;
+  min-width: 28px;
+  height: 28px;
+  font-size: 12.5px;
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--step-color, var(--accent)) 28%, transparent),
+    0 4px 14px rgb(0 0 0 / 0.25);
+}
+
+.flow-marker[data-state='current'] {
+  animation: flow-marker-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes flow-marker-pulse {
+  50% {
+    box-shadow:
+      0 0 0 9px color-mix(in srgb, var(--step-color, var(--accent)) 12%, transparent),
+      0 4px 14px rgb(0 0 0 / 0.25);
+  }
+}
+
+.flow-temp-arrow {
+  animation: aegon-flow 0.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-marker[data-state='current'],
+  .flow-temp-arrow {
+    animation: none;
+  }
+}
+
+/* Reproductor: barra de progreso de la reproducción automática */
+.player-progress {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform-origin: left;
+  animation: player-progress linear forwards;
+}
+
+@keyframes player-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Comentarios ---------------------------------------------------------------------------------- */
+
+.comment-anchor {
+  position: absolute;
+  z-index: 8;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.comment-pin {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  pointer-events: all;
+  cursor: grab;
+  transition: transform var(--dur-2) var(--ease-spring);
+  transform-origin: 0 100%;
+  animation: aegon-pop-in var(--dur-2) var(--ease-out);
+}
+
+.comment-pin:hover,
+.comment-pin.is-open {
+  transform: scale(1.12);
+}
+
+.comment-pin:active {
+  cursor: grabbing;
+}
+
+.comment-count {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1.5px solid var(--panel);
+  background: var(--fg);
+  color: var(--panel);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+}
+
+.comment-preview {
+  position: absolute;
+  left: 36px;
+  bottom: 0;
+  display: none;
+  width: max-content;
+  max-width: 240px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 9px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  pointer-events: none;
+}
+
+.comment-preview b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.comment-preview span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.comment-pin:hover .comment-preview {
+  display: flex;
+}
+
+.comment-card-pos {
+  position: absolute;
+  left: 38px;
+  bottom: -6px;
+  pointer-events: all;
+}
+
+.comment-card-pos[data-v='down'] {
+  top: -30px;
+  bottom: auto;
+}
+
+.comment-card-pos[data-h='left'] {
+  left: auto;
+  right: 10px;
+}
+
+.comment-card {
+  display: flex;
+  width: 300px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  cursor: default;
+  animation: aegon-pop-in var(--dur-2) var(--ease-out);
+}
+
+.comment-card.is-large {
+  width: auto;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  animation: none;
 }

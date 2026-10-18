@@ -1,0 +1,9 @@
+id: home-banking
+kind: system
+name: Home Banking
+description: Consulta de cuentas, transferencias y pagos para clientes.
+groups: [ aws-us-east-1 ]
+risk: high
+technology: [ react, java ]
+owner: Equipo Canales
+tags: [ pci, canal-digital ]

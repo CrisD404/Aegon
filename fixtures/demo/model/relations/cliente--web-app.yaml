@@ -1,0 +1,5 @@
+id: cliente--web-app
+from: cliente
+to: web-app
+label: Opera sus cuentas
+protocols: [ https ]

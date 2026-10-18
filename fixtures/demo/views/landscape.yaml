@@ -1,0 +1,13 @@
+id: landscape
+name: Landscape
+level: 1
+description: Contexto de la banca digital.
+nodes:
+  aws-us-east-1: { x: -40, y: 120, w: 640, h: 240 }
+  cliente: { x: 156, y: -120 }
+  core-bancario: { x: 800, y: 184 }
+  datacenter: { x: 760, y: 120, w: 320, h: 240 }
+  home-banking: { x: 0, y: 184 }
+  notificaciones: { x: 320, y: 184 }
+  operador: { x: 816, y: -120 }
+  pasarela-pagos: { x: 400, y: 480 }

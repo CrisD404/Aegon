@@ -1,0 +1,5 @@
+id: pagos-api--pasarela-pagos
+from: pagos-api
+to: pasarela-pagos
+label: Cobra tarjetas
+protocols: [ https ]

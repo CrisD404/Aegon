@@ -10,12 +10,16 @@ import {
   AlignStartVertical,
   AlignVerticalDistributeCenter,
   ArrowRightLeft,
+  BookmarkPlus,
   ChevronRight,
   ClipboardPaste,
   Copy,
   CopyPlus,
   EyeOff,
   Layers,
+  LayoutTemplate,
+  MessageSquarePlus,
+  Workflow,
   Maximize,
   Pencil,
   Plus,
@@ -37,7 +41,10 @@ import {
   paste,
   removeSelectionFromView,
 } from '../lib/actions.ts';
+import { openTemplates, saveSelectionAsTemplate } from '../lib/flows.tsx';
 import { IMPLIED_PREFIX } from './derive.ts';
+import { addStep } from '../lib/flow-actions.ts';
+import { startCommentAt } from './Comments.tsx';
 import { canvasApi } from './api.ts';
 
 export type ContextTarget = {
@@ -92,6 +99,10 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
   const el = target.id ? model.elements[target.id] : undefined;
   const rel = target.id && !target.id.startsWith(IMPLIED_PREFIX) ? model.relations[target.id] : undefined;
   const multi = selection.nodes.length > 1;
+  const editingFlow = useWorkspace((s) => {
+    const id = useUi.getState().flowEdit?.id;
+    return id ? s.model.flows?.[id] : undefined;
+  });
 
   const setShape = (shape: EdgeShape) => {
     if (view && rel) dispatch({ type: 'view.edge', view: view.id, relation: rel.id, style: shape === 'curved' ? null : { ...view.edges?.[rel.id], shape } }, { label: 'Forma de la relación' });
@@ -107,6 +118,7 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
         <ContextMenu.Separator className="menu-sep" />
         <Item icon={<CopyPlus size={14} />} shortcut="Ctrl D" onSelect={duplicateSelection}>Duplicar</Item>
         <Item icon={<Copy size={14} />} shortcut="Ctrl C" onSelect={copySelection}>Copiar</Item>
+        <Item icon={<BookmarkPlus size={14} />} onSelect={() => void saveSelectionAsTemplate()}>Guardar como template…</Item>
         <ContextMenu.Separator className="menu-sep" />
         <Item icon={<EyeOff size={14} />} shortcut="Supr" onSelect={removeSelectionFromView}>Quitar del lienzo</Item>
         <Item icon={<Trash2 size={14} />} shortcut="⇧ Supr" onSelect={deleteSelectionFromModel} danger>Eliminar del modelo</Item>
@@ -135,6 +147,23 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
         <Item icon={<span className="w-[14px] font-mono text-[10px] text-fg-subtle">ID</span>} onSelect={() => void navigator.clipboard?.writeText(el.id)}>
           Copiar ID <span className="font-mono text-[11px] text-fg-subtle">{el.id}</span>
         </Item>
+        <Item
+          icon={<BookmarkPlus size={14} />}
+          onSelect={() => {
+            useUi.getState().select([el.id]);
+            void saveSelectionAsTemplate();
+          }}
+        >
+          Guardar como template…
+        </Item>
+        {editingFlow ? (
+          <Item icon={<Workflow size={14} />} onSelect={() => addStep(editingFlow.id, { type: 'process', element: el.id })}>
+            Agregar al flujo «{editingFlow.name}»
+          </Item>
+        ) : null}
+        <Item icon={<MessageSquarePlus size={14} />} shortcut="C" onSelect={() => view && startCommentAt(view, target.flow, el.id)}>
+          Comentar
+        </Item>
         <ContextMenu.Separator className="menu-sep" />
         <Item icon={<EyeOff size={14} />} shortcut="Supr" onSelect={removeSelectionFromView}>Quitar del lienzo</Item>
         <Item icon={<Trash2 size={14} />} shortcut="⇧ Supr" onSelect={deleteSelectionFromModel} danger>Eliminar del modelo</Item>
@@ -145,6 +174,11 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
       <>
         <div className="menu-label">Relación</div>
         <Item icon={<Pencil size={14} />} onSelect={() => useUi.getState().setRightTab('inspector')}>Editar</Item>
+        {editingFlow ? (
+          <Item icon={<Workflow size={14} />} onSelect={() => addStep(editingFlow.id, { type: 'message', from: rel.from, to: rel.to, relation: rel.id })}>
+            Agregar al flujo «{editingFlow.name}»
+          </Item>
+        ) : null}
         <Item icon={<ArrowRightLeft size={14} />} onSelect={() => dispatch({ type: 'relation.update', id: rel.id, patch: { from: rel.to, to: rel.from } }, { label: 'Invertir relación' })}>Invertir dirección</Item>
         <Item
           icon={<ArrowRightLeft size={14} />}
@@ -182,6 +216,10 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
       <>
         <Item icon={<Plus size={14} />} shortcut="Doble click" onSelect={() => onOpenGhost(target.client.x, target.client.y)}>Agregar elemento aquí</Item>
         <Item icon={<ClipboardPaste size={14} />} shortcut="Ctrl V" onSelect={paste}>Pegar</Item>
+        <Item icon={<MessageSquarePlus size={14} />} shortcut="C" onSelect={() => view && startCommentAt(view, target.flow, null)} data-testid="ctx-comment-here">
+          Comentar aquí
+        </Item>
+        <Item icon={<LayoutTemplate size={14} />} onSelect={() => void openTemplates('block')}>Insertar template…</Item>
         <ContextMenu.Separator className="menu-sep" />
         <Item icon={<Wand2 size={14} />} shortcut="⇧L" onSelect={arrange}>Ordenar lienzo</Item>
         <Item icon={<Maximize size={14} />} shortcut="F" onSelect={() => canvasApi.fit()}>Encuadrar todo</Item>

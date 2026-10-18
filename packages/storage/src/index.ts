@@ -81,8 +81,10 @@ export class IdbStorage implements WorkspaceStorage {
   readonly label = 'Navegador';
   private readonly dbName: string;
   private store: UseStore | undefined;
+  readonly workspaceKey: string;
 
-  constructor(readonly workspaceKey: string) {
+  constructor(workspaceKey: string) {
+    this.workspaceKey = workspaceKey;
     this.dbName = `aegon-ws-${workspaceKey}`;
   }
   private db() {
@@ -154,7 +156,10 @@ export async function ensureDirectoryPermission(handle: FileSystemDirectoryHandl
 /** Carpeta local elegida por el usuario (Chromium/Edge; WebView2 en Windows también la soporta). */
 export class FolderStorage implements WorkspaceStorage {
   readonly kind = 'folder' as const;
-  constructor(readonly handle: FileSystemDirectoryHandle) {}
+  readonly handle: FileSystemDirectoryHandle;
+  constructor(handle: FileSystemDirectoryHandle) {
+    this.handle = handle;
+  }
 
   get label() {
     return this.handle.name;
@@ -166,7 +171,7 @@ export class FolderStorage implements WorkspaceStorage {
       for await (const [name, entry] of dir.entries()) {
         if (entry.kind === 'directory') {
           if (!IGNORED_DIRS.has(name)) await walk(entry as FileSystemDirectoryHandle, `${prefix}${name}/`);
-        } else if (/\.(ya?ml|md|svg|json|txt)$/i.test(name) || name === '.gitignore') {
+        } else if (/\.(ya?ml|md|svg|json|txt)$/i.test(name) || name === '.gitignore' || name === '.gitattributes') {
           out.push(`${prefix}${name}`);
         }
       }

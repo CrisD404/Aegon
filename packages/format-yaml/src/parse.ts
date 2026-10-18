@@ -1,13 +1,17 @@
 import { parseDocument } from 'yaml';
 import {
+  Comment as CommentSchema,
   Element as ElementSchema,
+  Flow as FlowSchema,
   Relation as RelationSchema,
   SCHEMA_VERSION,
   View as ViewSchema,
   WorkspaceMeta as WorkspaceSchema,
   validateModel,
+  type Comment,
   type Diagnostic,
   type Element,
+  type Flow,
   type Model,
   type Relation,
   type View,
@@ -68,6 +72,8 @@ export function parseWorkspace(input: ReadonlyMap<string, string>, options: { va
   const elements: Record<string, Element> = {};
   const relations: Record<string, Relation> = {};
   const views: Record<string, View> = {};
+  const flows: Record<string, Flow> = {};
+  const comments: Record<string, Comment> = {};
   const passthrough: Record<string, string> = {};
   const sourceOf = new Map<string, string>();
 
@@ -81,9 +87,10 @@ export function parseWorkspace(input: ReadonlyMap<string, string>, options: { va
     }
     const raw = readYaml(path, text, diagnostics);
     if (raw === undefined) continue;
-    const target = kind.type === 'element' ? elements : kind.type === 'relation' ? relations : views;
-    const schema: ZodType<Element | Relation | View> =
-      kind.type === 'element' ? ElementSchema : kind.type === 'relation' ? RelationSchema : ViewSchema;
+    const target = { element: elements, relation: relations, view: views, flow: flows, comment: comments }[kind.type];
+    const schema = { element: ElementSchema, relation: RelationSchema, view: ViewSchema, flow: FlowSchema, comment: CommentSchema }[
+      kind.type
+    ] as ZodType<Element | Relation | View | Flow | Comment>;
     const value = validate(schema, raw, path, diagnostics);
     if (!value) continue;
     if (value.id !== kind.id) {
@@ -98,6 +105,8 @@ export function parseWorkspace(input: ReadonlyMap<string, string>, options: { va
   }
 
   const model: Model = { workspace, elements, relations, views };
+  if (Object.keys(flows).length) model.flows = flows;
+  if (Object.keys(comments).length) model.comments = comments;
   if (Object.keys(passthrough).length) model.passthrough = passthrough;
 
   if (options.validate !== false) {

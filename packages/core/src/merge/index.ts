@@ -1,6 +1,6 @@
 import type { Model } from '../model/index.ts';
-import type { Element, Id, Relation, View } from '../schema/index.ts';
-import { deepEqual } from '../diff/index.ts';
+import type { Comment, Element, Flow, Id, Relation, View } from '../schema/index.ts';
+import { commentLabel, deepEqual } from '../diff/index.ts';
 
 /**
  * Merge semántico de tres vías (base, nuestro, de ellos) por entidad y, dentro de cada entidad,
@@ -9,7 +9,7 @@ import { deepEqual } from '../diff/index.ts';
  * cambiaron el mismo campo de forma distinta (o uno lo borró y el otro lo modificó).
  */
 
-export type MergeEntity = 'workspace' | 'element' | 'relation' | 'view' | 'file';
+export type MergeEntity = 'workspace' | 'element' | 'relation' | 'view' | 'flow' | 'comment' | 'file';
 export type ConflictKind = 'both-modified' | 'both-added' | 'modified-deleted' | 'deleted-modified';
 export type Resolution = 'ours' | 'theirs';
 
@@ -81,6 +81,7 @@ function nameOf(entity: MergeEntity, value: unknown, id: Id): string {
     const r = value as Relation | undefined;
     return r ? `${r.from} → ${r.to}` : id;
   }
+  if (entity === 'comment') return value ? commentLabel(value as Comment) : id;
   const named = value as { name?: string } | undefined;
   return named?.name ?? id;
 }
@@ -137,12 +138,16 @@ export function mergeModels(base: Model, ours: Model, theirs: Model): MergeResul
   const elements = mergeRecords<Element>('element', base.elements, ours.elements, theirs.elements, conflicts);
   const relations = mergeRecords<Relation>('relation', base.relations, ours.relations, theirs.relations, conflicts);
   const views = mergeRecords<View>('view', base.views, ours.views, theirs.views, conflicts);
+  const flows = mergeRecords<Flow>('flow', base.flows ?? {}, ours.flows ?? {}, theirs.flows ?? {}, conflicts);
+  const comments = mergeRecords<Comment>('comment', base.comments ?? {}, ours.comments ?? {}, theirs.comments ?? {}, conflicts);
 
   const wrap = (m: Model) => Object.fromEntries(Object.entries(m.passthrough ?? {}).map(([p, c]) => [p, { content: c }]));
   const files = mergeRecords<{ content: string }>('file', wrap(base), wrap(ours), wrap(theirs), conflicts);
   const passthrough = Object.fromEntries(Object.entries(files).map(([p, f]) => [p, f.content]));
 
   const merged: Model = { workspace, elements, relations, views };
+  if (Object.keys(flows).length) merged.flows = flows;
+  if (Object.keys(comments).length) merged.comments = comments;
   if (Object.keys(passthrough).length) merged.passthrough = passthrough;
   const repaired = repairModel(merged);
   return { merged: repaired.model, conflicts, repairs: repaired.notes };
@@ -171,6 +176,8 @@ function collectionOf(model: Model, entity: MergeEntity): Record<Id, unknown> | 
   if (entity === 'element') return model.elements as Record<Id, unknown>;
   if (entity === 'relation') return model.relations as Record<Id, unknown>;
   if (entity === 'view') return model.views as Record<Id, unknown>;
+  if (entity === 'flow') return model.flows as Record<Id, unknown> | undefined;
+  if (entity === 'comment') return model.comments as Record<Id, unknown> | undefined;
   return undefined;
 }
 
@@ -190,6 +197,8 @@ export function applyResolutions(
     elements: { ...result.merged.elements },
     relations: { ...result.merged.relations },
     views: { ...result.merged.views },
+    flows: { ...(result.merged.flows ?? {}) },
+    comments: { ...(result.merged.comments ?? {}) },
     ...(result.merged.passthrough ? { passthrough: { ...result.merged.passthrough } } : {}),
   };
   for (const conflict of result.conflicts) {
@@ -210,7 +219,7 @@ export function applyResolutions(
       continue;
     }
     const target = collectionOf(model, conflict.entity)!;
-    const sourceValue = collectionOf(source, conflict.entity)![conflict.id];
+    const sourceValue = (collectionOf(source, conflict.entity) ?? {})[conflict.id];
     if (conflict.kind === 'modified-deleted' || conflict.kind === 'deleted-modified') {
       if (sourceValue === undefined) delete target[conflict.id];
       else target[conflict.id] = sourceValue;
@@ -280,5 +289,8 @@ export function repairModel(model: Model): { model: Model; notes: string[] } {
   const workspace = { ...model.workspace };
   if (workspace.defaultView && !views[workspace.defaultView]) delete workspace.defaultView;
   const out: Model = { ...model, workspace, elements, relations, views };
+  // Flujos y comentarios: las referencias colgantes se informan en la validación, no se borran.
+  if (out.flows && !Object.keys(out.flows).length) delete out.flows;
+  if (out.comments && !Object.keys(out.comments).length) delete out.comments;
   return { model: out, notes };
 }
