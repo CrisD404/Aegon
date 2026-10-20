@@ -19,9 +19,10 @@ export interface WorkspaceRecord {
   name: string;
   /**
    * browser: IndexedDB · folder: carpeta vía File System Access (web) · desktop: carpeta del
-   * disco en la app de escritorio (con git si es un repo) · github: copia local de un repo de GitHub.
+   * disco en la app de escritorio (con git si es un repo) · github: copia local de un repo de GitHub ·
+   * dev: carpeta del disco servida por `vite dev` (solo desarrollo).
    */
-  source: 'browser' | 'folder' | 'desktop' | 'github';
+  source: 'browser' | 'folder' | 'desktop' | 'github' | 'dev';
   folderName?: string;
   /** Ruta absoluta (app de escritorio). */
   path?: string;

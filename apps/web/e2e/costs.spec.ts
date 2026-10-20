@@ -9,7 +9,9 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('la capa de costos muestra totales por nodo y por ambiente', async ({ page }) => {
-  await page.getByTestId('dock-costs').click();
+  await page.getByTestId('view-settings').click();
+  await page.getByTestId('view-settings-panel').getByRole('switch', { name: /^Costos/ }).click();
+  await page.keyboard.press('Escape');
   const total = page.getByTestId('cost-chip-total');
   await expect(total).toContainText('10.840');
   await expect(page.getByTestId('cost-home-banking')).toContainText('9,5k');

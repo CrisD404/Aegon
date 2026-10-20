@@ -129,7 +129,8 @@ const PREF_DEFAULTS: Prefs = {
   snap: true,
   rulers: true,
   minimap: false,
-  focusMode: false,
+  // Foco en la selección por defecto (atenúa suave lo no relacionado); se apaga en Vista o con ⇧F.
+  focusMode: true,
   costOverlay: false,
   costEnv: null,
   showComments: true,
@@ -139,7 +140,21 @@ const PREF_DEFAULTS: Prefs = {
   sidebarTab: 'model',
 };
 
-const prefs = loadPrefs(PREF_DEFAULTS);
+const prefs = migratePrefs(loadPrefs(PREF_DEFAULTS));
+
+/**
+ * Cambios de default que también aplican a quien ya tenía preferencias guardadas (versión 2: el
+ * foco en la selección pasa a estar activado).
+ */
+function migratePrefs(p: Prefs): Prefs {
+  try {
+    if (localStorage.getItem('aegon.prefs.version') === '2') return p;
+    localStorage.setItem('aegon.prefs.version', '2');
+    return { ...p, focusMode: true };
+  } catch {
+    return p;
+  }
+}
 const media =
   typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 

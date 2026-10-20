@@ -4,19 +4,25 @@ import { AppWindow, Cog, Globe, Layers, Link2, Monitor, Smartphone, Webhook, Wor
 import {
   BUS_TYPE_LABEL,
   CONTAINER_TYPE_LABEL,
+  INFRA_TYPE_LABEL,
   KIND_LABEL,
+  NODE_TYPE_LABEL,
   RISK_LABEL,
   findBroker,
   findEngine,
   findTechnology,
   type ContainerType,
   type Element,
+  ADDRESS_ROW_HEIGHT,
+  addressRows,
+  networkLabels,
 } from '@aegon/core';
 import { TechIcon } from '@aegon/icons';
 import type { ElementFlowNode } from '../derive.ts';
 import { useLod } from '../lod.ts';
 import { useNodeCost } from '../costs.ts';
 import { moneyCompact } from '../../lib/money.ts';
+import { INFRA_TYPE_ICON, NODE_TYPE_ICON } from './deployment-icons.tsx';
 
 /** Costo mensual del nodo (propio + hijos) con la capa de costos activa. */
 export function CostBadge({ id }: { id: string }) {
@@ -66,8 +72,15 @@ export function elementIcon(el: Element): { icon: string; label: string } {
 }
 
 /** Línea secundaria del nodo: qué es (tipo, motor, broker, rol) antes que su tecnología. */
-export function kindCaption(el: Element): string {
+export function kindCaption(el: Element, target?: Element): string {
   const external = el.scope === 'external';
+  if (el.kind === 'infra') return INFRA_TYPE_LABEL[el.infra.type];
+  if (el.kind === 'node') return NODE_TYPE_LABEL[el.node.type];
+  if (el.kind === 'instance') {
+    if (!target) return 'Instancia';
+    const base = kindCaption(target);
+    return target.name !== el.name ? `${target.name} · ${base}` : base;
+  }
   if (el.kind === 'store') {
     const engine = el.store.engine === 'other' ? el.store.customEngine : findEngine(el.store.engine)?.name;
     return [external ? 'Base de datos externa' : 'Base de datos', engine].filter(Boolean).join(' · ');
@@ -85,8 +98,9 @@ export function kindCaption(el: Element): string {
   return external ? `${base} externo` : base;
 }
 
-export function technologyOf(el: Element): string[] {
-  return el.kind === 'system' || el.kind === 'container' || el.kind === 'component' ? (el.technology ?? []) : [];
+export function technologyOf(el: Element, target?: Element): string[] {
+  if (el.kind === 'instance') return target ? technologyOf(target) : [];
+  return 'technology' in el ? (el.technology ?? []) : [];
 }
 
 function Handles() {
@@ -100,9 +114,23 @@ function Handles() {
 }
 
 /** Chip del tipo: la forma (círculo, cilindro, píldora, cuadrado) dice qué es el elemento. */
-export function KindChip({ el, size = 16 }: { el: Element; size?: number }) {
+export function KindChip({ el, size = 16, target }: { el: Element; size?: number; target?: Element }) {
+  // Una instancia se ve como lo que despliega (mismo chip), con la marca de instancia.
+  if (el.kind === 'instance' && target && target.kind !== 'instance') {
+    return (
+      <span className="c4-chip-wrap" data-instance>
+        <KindChip el={target} size={size} />
+      </span>
+    );
+  }
   let content: ReactNode;
-  if (el.kind === 'container' && el.containerType) {
+  if (el.kind === 'infra') {
+    const Icon = INFRA_TYPE_ICON[el.infra.type];
+    content = <Icon size={size} strokeWidth={1.75} />;
+  } else if (el.kind === 'node') {
+    const Icon = NODE_TYPE_ICON[el.node.type];
+    content = <Icon size={size} strokeWidth={1.75} />;
+  } else if (el.kind === 'container' && el.containerType) {
     const Icon = CONTAINER_ICON[el.containerType];
     content = <Icon size={size} strokeWidth={1.75} />;
   } else {
@@ -116,12 +144,17 @@ export function KindChip({ el, size = 16 }: { el: Element; size?: number }) {
   );
 }
 
-function ElementNodeImpl({ data, height, selected }: NodeProps<ElementFlowNode>) {
+function ElementNodeImpl({ data, width, height, selected }: NodeProps<ElementFlowNode>) {
   const el = data.element;
+  const target = data.target;
   const lod = useLod();
+  const replicas = el.kind === 'instance' ? el.instance.replicas : undefined;
   const common = {
-    'data-kind': el.kind,
-    'data-external': el.scope === 'external' || undefined,
+    // Una instancia toma el color de lo que despliega.
+    'data-kind': el.kind === 'instance' ? (target?.kind ?? 'container') : el.kind,
+    'data-instance': el.kind === 'instance' || undefined,
+    'data-replicas': replicas && replicas > 1 ? replicas : undefined,
+    'data-external': el.scope === 'external' || (el.kind === 'instance' && target?.scope === 'external') || undefined,
     'data-status': el.status,
     'data-testid': `node-${el.id}`,
   };
@@ -136,20 +169,26 @@ function ElementNodeImpl({ data, height, selected }: NodeProps<ElementFlowNode>)
       </div>
     );
   }
-  const technology = technologyOf(el);
+  const technology = technologyOf(el, target);
   const risk = 'risk' in el ? el.risk : undefined;
-  const tall = (height ?? 0) >= DESCRIPTION_MIN_HEIGHT;
+  const network = el.kind === 'infra' || el.kind === 'instance' || el.kind === 'node' ? networkLabels(el) : [];
+  const rows = network.length ? addressRows(network, width ?? undefined) : [];
+  // Las direcciones ocupan su lugar: la descripción solo entra si el nodo es más alto todavía.
+  const tall = (height ?? 0) >= DESCRIPTION_MIN_HEIGHT + rows.length * ADDRESS_ROW_HEIGHT;
 
   return (
     <div className="c4-node" {...common} data-tall={tall || undefined} data-new={data.fresh || undefined}>
       <NodeResizer isVisible={selected} minWidth={160} minHeight={60} />
       <span className="c4-node__stripe" />
-      <KindChip el={el} />
+      <KindChip el={el} target={target} />
       <div className="c4-node__body">
-        <div className="c4-node__name">{el.name}</div>
+        <div className="c4-node__name">
+          {el.name}
+          {replicas && replicas > 1 ? <span className="c4-node__replicas" title={`${replicas} réplicas`}>×{replicas}</span> : null}
+        </div>
         <div className="c4-node__metarow">
           <span className="c4-node__meta">
-            {kindCaption(el)}
+            {kindCaption(el, target)}
             {technology.length ? <span className="c4-node__tech"> · {technology.map((t) => findTechnology(t)?.name ?? t).join(', ')}</span> : null}
           </span>
           {data.viewCount > 1 ? (
@@ -165,6 +204,13 @@ function ElementNodeImpl({ data, height, selected }: NodeProps<ElementFlowNode>)
             </span>
           ) : null}
         </div>
+        {rows.length ? (
+          <div className="c4-node__addr" title={network.join('\n')}>
+            {rows.map((row, i) => (
+              <div key={i}>{row}</div>
+            ))}
+          </div>
+        ) : null}
         {tall && el.description ? <p className="c4-node__desc">{el.description}</p> : null}
       </div>
       {risk ? <span className="c4-node__risk" data-risk={risk} title={`Riesgo ${RISK_LABEL[risk].toLowerCase()}`} /> : null}

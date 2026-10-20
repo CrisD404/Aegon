@@ -3,7 +3,10 @@ import {
   DB_ENGINES,
   ELEMENT_KINDS,
   GROUP_PROVIDERS,
+  INFRA_TYPES,
+  INSTANCE_OF_KINDS,
   MESSAGE_BROKERS,
+  NODE_TYPES,
   PROTOCOLS,
   TECHNOLOGIES,
   KINDS_WITH_TECHNOLOGY,
@@ -20,6 +23,7 @@ import {
   placementProblem,
   sortedValues,
   suggestProtocols,
+  uniqueId,
   type CatalogItem,
   type ContainerType,
   type Direction,
@@ -27,6 +31,8 @@ import {
   type ElementKind,
   type GroupProvider,
   type Id,
+  type InfraType,
+  type NodeType,
   type Model,
   type NodeLayout,
   type Op,
@@ -34,6 +40,8 @@ import {
   type RelationPatch,
   type Risk,
   type Status,
+  elkArrangeOp,
+  type ElkGraphNode,
 } from '@aegon/core';
 import { WorkspaceError, resolveRef } from './workspace.ts';
 
@@ -65,6 +73,14 @@ const KIND_ALIASES: Readonly<Record<string, ElementKind>> = {
   topic: 'bus',
   group: 'group',
   grupo: 'group',
+  node: 'node',
+  nodo: 'node',
+  'deployment-node': 'node',
+  infra: 'infra',
+  infrastructure: 'infra',
+  infraestructura: 'infra',
+  instance: 'instance',
+  instancia: 'instance',
 };
 
 export function resolveKind(kind: string): ElementKind {
@@ -101,6 +117,26 @@ export interface AddElementInput {
   topics?: string[];
   provider?: string;
   region?: string;
+  /** node: tipo (datacenter, cloud, network, cluster, namespace, server, vm…). */
+  nodeType?: string;
+  /** node: cuenta, suscripción o proyecto. */
+  account?: string;
+  /** node: tamaño o tipo de instancia (`m5.2xlarge`). */
+  size?: string;
+  /** node: cantidad de nodos iguales. */
+  instances?: number;
+  /** infra: tipo (firewall, load-balancer, dns, ingress, egress…). */
+  infraType?: string;
+  /** instance: elemento que despliega (container, store, bus o system). */
+  of?: string;
+  /** instance: réplicas. */
+  replicas?: number;
+  /** node/infra/instance: IPs, hostnames, URLs. */
+  addresses?: string[];
+  /** node/infra/instance: ID del recurso en el proveedor. */
+  resource?: string;
+  /** Ambientes donde existe (IDs del workspace). */
+  environments?: string[];
   external?: boolean;
   status?: Status;
   risk?: Risk;
@@ -120,7 +156,8 @@ export interface AddElementPlan {
 
 export function planAddElement(model: Model, input: AddElementInput): AddElementPlan {
   const kind = resolveKind(input.kind);
-  const name = input.name.trim();
+  const fallbackName = kind === 'instance' && input.of ? resolveRef(sortedValues(model.elements), input.of, 'elemento').name : '';
+  const name = (input.name ?? '').trim() || fallbackName;
   if (!name) throw new WorkspaceError('invalid-name', 'El nombre no puede estar vacío');
   const warnings: string[] = [];
   const elements = sortedValues(model.elements);
@@ -135,13 +172,18 @@ export function planAddElement(model: Model, input: AddElementInput): AddElement
   if (input.parent) fields.parent = resolveRef(elements, input.parent, 'elemento').id;
   if (input.groups?.length) fields.groups = input.groups.map((g) => resolveRef(elements, g, 'grupo').id);
 
+  if (input.environments?.length) {
+    const known = new Set((model.workspace.environments ?? []).map((e) => e.id));
+    for (const env of input.environments) if (!known.has(env)) warnings.push(`El ambiente "${env}" no está definido en el workspace`);
+    fields.environments = input.environments;
+  }
   if (input.risk) {
-    if (kind === 'actor' || kind === 'group') warnings.push(`"risk" no aplica a un ${kind}: se ignora`);
+    if (kind === 'actor' || kind === 'group' || kind === 'instance') warnings.push(`"risk" no aplica a un ${kind}: se ignora`);
     else fields.risk = input.risk;
   }
   if (input.technology?.length) {
     if (!KINDS_WITH_TECHNOLOGY.includes(kind)) {
-      warnings.push(`"technology" solo aplica a system, container y component (una base se describe por su motor y un bus por su broker)`);
+      warnings.push(`"technology" solo aplica a system, container, component, node e infra (una base se describe por su motor, un bus por su broker y una instancia por lo que despliega)`);
     } else {
       fields.technology = normalizeTechnologies(input.technology, warnings);
     }
@@ -182,7 +224,48 @@ export function planAddElement(model: Model, input: AddElementInput): AddElement
       throw new WorkspaceError('invalid-field', `Proveedor inválido "${input.provider}": usá ${GROUP_PROVIDERS.join(', ')}`);
     }
     fields.group = input.region ? { provider: provider as GroupProvider, region: input.region } : { provider: provider as GroupProvider };
-  } else if (input.provider) warnings.push('"provider" solo aplica a un grupo: se ignora');
+  } else if (kind === 'node') {
+    const type = (input.nodeType ?? 'server').toLowerCase();
+    if (!(NODE_TYPES as readonly string[]).includes(type)) {
+      throw new WorkspaceError('invalid-field', `Tipo de nodo inválido "${input.nodeType}": usá ${NODE_TYPES.join(', ')}`);
+    }
+    const node: Record<string, unknown> = { type: type as NodeType };
+    if (input.provider) node.provider = input.provider.toLowerCase();
+    if (input.region) node.region = input.region;
+    if (input.account) node.account = input.account;
+    if (input.size) node.size = input.size;
+    if (input.instances) node.instances = input.instances;
+    fields.node = node;
+  } else if (input.provider) warnings.push('"provider" solo aplica a un grupo o a un nodo de despliegue: se ignora');
+  if (kind !== 'node' && (input.nodeType || input.account || input.size || input.instances)) {
+    warnings.push('"nodeType", "account", "size" e "instances" solo aplican a un nodo de despliegue: se ignoran');
+  }
+  if (kind === 'infra') {
+    const type = (input.infraType ?? 'other').toLowerCase();
+    if (!(INFRA_TYPES as readonly string[]).includes(type)) {
+      throw new WorkspaceError('invalid-field', `Tipo de infraestructura inválido "${input.infraType}": usá ${INFRA_TYPES.join(', ')}`);
+    }
+    fields.infra = { type: type as InfraType };
+  } else if (input.infraType) warnings.push('"infraType" solo aplica a infraestructura: se ignora');
+  if (kind === 'instance') {
+    if (!input.of) throw new WorkspaceError('invalid-field', 'Una instancia necesita "of": el container, store, bus o system que despliega');
+    const target = resolveRef(elements, input.of, 'elemento');
+    if (!(INSTANCE_OF_KINDS as readonly string[]).includes(target.kind)) {
+      throw new WorkspaceError('invalid-field', `Una instancia despliega un container, store, bus o system; "${target.name}" es un ${target.kind}`);
+    }
+    fields.instance = input.replicas ? { of: target.id, replicas: input.replicas } : { of: target.id };
+    // ID legible por ambiente (`web-app-qa`): el nombre suele repetir el del contenedor.
+    if (!input.id) {
+      const env = input.environments?.length === 1 ? input.environments[0] : undefined;
+      fields.id = uniqueId(env ? `${target.id}-${env}` : `${target.id}-instancia`, (x) => !!model.elements[x]);
+    }
+  } else if (input.of || input.replicas) warnings.push('"of" y "replicas" solo aplican a una instancia: se ignoran');
+  if (input.addresses?.length || input.resource) {
+    if (kind === 'node' || kind === 'infra' || kind === 'instance') {
+      if (input.addresses?.length) fields.addresses = input.addresses;
+      if (input.resource) fields.resource = input.resource;
+    } else warnings.push('"addresses" y "resource" solo aplican a elementos de despliegue (node, infra, instance): se ignoran');
+  }
 
   const view = input.view ? resolveRef(sortedValues(model.views), input.view, 'lienzo') : undefined;
   const created = createElementOp(model, { kind, name, fields: fields as Partial<Element>, view: view?.id });
@@ -206,6 +289,7 @@ export interface ConnectInput {
   label?: string;
   description?: string;
   protocols?: string[];
+  ports?: number[];
   direction?: Direction;
   status?: Status;
   tags?: string[];
@@ -251,6 +335,11 @@ export function planConnect(model: Model, input: ConnectInput): ConnectPlan {
   if (input.label) fields.label = input.label;
   if (input.description) fields.description = input.description;
   if (input.protocols?.length) fields.protocols = normalizeProtocols(input.protocols, warnings);
+  if (input.ports?.length) {
+    const bad = input.ports.filter((p) => !Number.isInteger(p) || p < 1 || p > 65535);
+    if (bad.length) throw new WorkspaceError('invalid-field', `Puertos inválidos: ${bad.join(', ')} (1 a 65535)`);
+    fields.ports = [...input.ports];
+  }
   if (input.direction && input.direction !== 'outgoing') fields.direction = input.direction;
   if (input.status) fields.status = input.status;
   if (input.tags?.length) fields.tags = input.tags;
@@ -299,11 +388,26 @@ export function planPlace(model: Model, viewRef: string, ids: readonly string[],
   return { op: Object.keys(nodes).length ? { type: 'view.place', view: view.id, nodes } : null, view: view.id, nodes, skipped };
 }
 
-export function planLayout(model: Model, viewRef: string, ids?: readonly string[]): { op: Op | null; view: Id; moved: number } {
+/** ELK en Node (`elkjs`): el mismo layout que la app, que lo corre en un Web Worker. */
+async function runElkNode(graph: ElkGraphNode): Promise<ElkGraphNode> {
+  const { default: ELK } = await import('elkjs/lib/elk.bundled.js');
+  return (await new ELK().layout(graph as Parameters<InstanceType<typeof ELK>['layout']>[0])) as ElkGraphNode;
+}
+
+/**
+ * Ordena un lienzo (o esos elementos) con ELK, igual que Shift+L en la app; si ELK falla, usa el
+ * orden por capas del núcleo.
+ */
+export async function planLayout(model: Model, viewRef: string, ids?: readonly string[]): Promise<{ op: Op | null; view: Id; moved: number }> {
   const view = resolveRef(sortedValues(model.views), viewRef, 'lienzo');
   const elements = sortedValues(model.elements);
   const targets = ids?.map((r) => resolveRef(elements, r, 'elemento').id);
-  const op = arrangeViewOp(model, view.id, targets);
+  let op: Op | null;
+  try {
+    op = await elkArrangeOp(model, view.id, runElkNode, targets);
+  } catch {
+    op = arrangeViewOp(model, view.id, targets);
+  }
   if (!op || op.type !== 'view.place') return { op: null, view: view.id, moved: 0 };
   const moved = Object.entries(op.nodes).filter(([id, l]) => {
     const prev = view.nodes[id];

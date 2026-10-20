@@ -3,9 +3,14 @@ import {
   childLevelOf,
   childViewOf,
   descendantsOf,
+  edgeLabelSize,
   indexOf,
+  isFrameKind,
+  isNetworkRelation,
+  projectedEdges,
   representativeInView,
   sizeOf,
+  visualParentOf as coreVisualParentOf,
   type EdgeShape,
   type Element,
   type ElementOf,
@@ -15,6 +20,7 @@ import {
   type Relation,
   type View,
 } from '@aegon/core';
+import { floatingEnds, pointOnEdge, type Rect } from './edges/geometry.ts';
 
 export interface ElementNodeData extends Record<string, unknown> {
   element: Element;
@@ -26,10 +32,17 @@ export interface ElementNodeData extends Record<string, unknown> {
   canDrill: boolean;
   hasChildView: boolean;
   fresh: boolean;
+  /** Solo instancias: el elemento que despliega (su tipo, ícono y tecnología). */
+  target?: Element;
 }
 
 export interface GroupNodeData extends Record<string, unknown> {
   element: ElementOf<'group'>;
+  fresh: boolean;
+}
+
+export interface DeploymentNodeData extends Record<string, unknown> {
+  element: ElementOf<'node'>;
   fresh: boolean;
 }
 
@@ -39,8 +52,12 @@ export interface BoundaryNodeData extends Record<string, unknown> {
 
 export type ElementFlowNode = Node<ElementNodeData, 'element'>;
 export type GroupFlowNode = Node<GroupNodeData, 'group'>;
+export type DeploymentFlowNode = Node<DeploymentNodeData, 'deployment'>;
 export type BoundaryFlowNode = Node<BoundaryNodeData, 'boundary'>;
-export type AegonNode = ElementFlowNode | GroupFlowNode | BoundaryFlowNode;
+export type AegonNode = ElementFlowNode | GroupFlowNode | DeploymentFlowNode | BoundaryFlowNode;
+
+/** Tipos de nodo de ReactFlow que son marcos (contienen a otros). */
+export const FRAME_NODE_TYPES = new Set(['group', 'deployment']);
 
 export interface RelationEdgeData extends Record<string, unknown> {
   relations: Relation[];
@@ -49,12 +66,31 @@ export interface RelationEdgeData extends Record<string, unknown> {
   bidirectional: boolean;
   flow: EdgeFlow | null;
   fresh: boolean;
+  /** Despliegue: relación lógica dibujada entre instancias (no hay camino de red explícito). */
+  projected?: boolean;
+  /** Despliegue: tramo de red (toca un nodo, infraestructura o instancia). */
+  network?: boolean;
+  /** Dónde va la etiqueta sobre el trazo (0 a 1) si en el medio tapa algo; sin valor, al medio. */
+  labelT?: number;
 }
 
 export type RelationFlowEdge = Edge<RelationEdgeData, 'relation'>;
 
 export const BOUNDARY_PREFIX = 'boundary:';
 export const IMPLIED_PREFIX = 'implied:';
+export const PROJECTED_PREFIX = 'projected:';
+
+/** Relación que el lienzo deriva (implícita o proyectada): no es una relación del modelo. */
+export function derivedEdgeEnds(id: string): { from: Id; to: Id } | null {
+  const prefix = id.startsWith(IMPLIED_PREFIX)
+    ? IMPLIED_PREFIX
+    : id.startsWith(PROJECTED_PREFIX)
+      ? PROJECTED_PREFIX
+      : null;
+  if (!prefix) return null;
+  const [from, to] = id.slice(prefix.length).split('>');
+  return from && to ? { from, to } : null;
+}
 
 function groupDepth(model: Model, id: Id): number {
   let depth = 0;
@@ -68,40 +104,27 @@ function groupDepth(model: Model, id: Id): number {
   return depth;
 }
 
-/** Grupo (ubicado en este lienzo) que contiene visualmente al elemento: el más profundo. */
-export function visualParentOf(model: Model, view: View, el: Element): Id | undefined {
-  if (el.kind === 'group') {
-    let current = el.parent;
-    const seen = new Set<Id>();
-    while (current && !seen.has(current)) {
-      if (view.nodes[current]) return current;
-      seen.add(current);
-      current = model.elements[current]?.parent;
-    }
-    return undefined;
-  }
-  let best: Id | undefined;
-  let bestDepth = -1;
-  for (const g of el.groups ?? []) {
-    if (!view.nodes[g] || model.elements[g]?.kind !== 'group') continue;
-    const depth = groupDepth(model, g);
-    if (depth > bestDepth) {
-      best = g;
-      bestDepth = depth;
-    }
-  }
-  return best;
-}
+/** Marco (grupo o nodo de despliegue ubicado en este lienzo) que contiene visualmente al elemento. */
+export const visualParentOf = coreVisualParentOf;
 
 // Cache de `data` por elemento: si nada cambió se reutiliza el mismo objeto y el nodo memoizado
 // no se vuelve a renderizar.
-const dataCache = new WeakMap<Element, { key: string; data: ElementNodeData | GroupNodeData }>();
+const dataCache = new WeakMap<
+  Element,
+  { key: string; data: ElementNodeData | GroupNodeData | DeploymentNodeData }
+>();
 
-function nodeData(el: Element, extra: Omit<ElementNodeData, 'element'> | Omit<GroupNodeData, 'element'>) {
+function nodeData(
+  el: Element,
+  extra:
+    | Omit<ElementNodeData, 'element'>
+    | Omit<GroupNodeData, 'element'>
+    | Omit<DeploymentNodeData, 'element'>,
+) {
   const key = JSON.stringify(extra);
   const cached = dataCache.get(el);
   if (cached && cached.key === key) return cached.data;
-  const data = { element: el, ...extra } as ElementNodeData | GroupNodeData;
+  const data = { element: el, ...extra } as ElementNodeData | GroupNodeData | DeploymentNodeData;
   dataCache.set(el, { key, data });
   return data;
 }
@@ -109,7 +132,7 @@ function nodeData(el: Element, extra: Omit<ElementNodeData, 'element'> | Omit<Gr
 /** Nodos de ReactFlow para un lienzo. Las posiciones del YAML son absolutas; ReactFlow usa relativas al grupo. */
 export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): AegonNode[] {
   const idx = indexOf(model);
-  const groups: GroupFlowNode[] = [];
+  const groups: (GroupFlowNode | DeploymentFlowNode)[] = [];
   const others: ElementFlowNode[] = [];
 
   for (const [id, layout] of Object.entries(view.nodes)) {
@@ -118,7 +141,9 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
     const size = sizeOf(el, layout);
     const parentId = visualParentOf(model, view, el);
     const parentLayout = parentId ? view.nodes[parentId] : undefined;
-    const position = parentLayout ? { x: layout.x - parentLayout.x, y: layout.y - parentLayout.y } : { x: layout.x, y: layout.y };
+    const position = parentLayout
+      ? { x: layout.x - parentLayout.x, y: layout.y - parentLayout.y }
+      : { x: layout.x, y: layout.y };
     if (el.kind === 'group') {
       groups.push({
         id,
@@ -132,11 +157,27 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
       });
       continue;
     }
+    if (el.kind === 'node') {
+      groups.push({
+        id,
+        type: 'deployment',
+        position,
+        width: size.w,
+        height: size.h,
+        ...(parentId ? { parentId } : {}),
+        zIndex: -10 + groupDepth(model, id),
+        data: nodeData(el, { fresh: fresh.has(id) }) as DeploymentNodeData,
+      });
+      continue;
+    }
+    const target = el.kind === 'instance' ? model.elements[el.instance.of] : undefined;
     const drillLevel = childLevelOf(el.kind);
     const childCount = drillLevel
       ? (idx.childrenOf.get(id) ?? []).filter((c) => {
           const kind = model.elements[c]?.kind;
-          return drillLevel === 2 ? kind === 'container' || kind === 'store' || kind === 'bus' : kind === 'component';
+          return drillLevel === 2
+            ? kind === 'container' || kind === 'store' || kind === 'bus'
+            : kind === 'component';
         }).length
       : 0;
     others.push({
@@ -153,6 +194,7 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
         canDrill: !!drillLevel,
         hasChildView: !!childViewOf(model, id),
         fresh: fresh.has(id),
+        ...(target ? { target } : {}),
       }) as ElementNodeData,
     });
   }
@@ -162,7 +204,9 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
 }
 
 /** Rectángulos absolutos de los nodos (resolviendo la jerarquía de grupos). */
-export function absoluteRects(nodes: readonly Node[]): Map<string, { x: number; y: number; w: number; h: number }> {
+export function absoluteRects(
+  nodes: readonly Node[],
+): Map<string, { x: number; y: number; w: number; h: number }> {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const out = new Map<string, { x: number; y: number; w: number; h: number }>();
   const resolve = (n: Node, depth = 0): { x: number; y: number } => {
@@ -187,8 +231,12 @@ export function absoluteRects(nodes: readonly Node[]): Map<string, { x: number; 
 }
 
 /** Marco del elemento abierto (L2/L3) que envuelve a sus hijos ubicados. */
-export function deriveBoundary(model: Model, view: View, nodes: readonly Node[]): BoundaryFlowNode | null {
-  if (!view.scope) return null;
+export function deriveBoundary(
+  model: Model,
+  view: View,
+  nodes: readonly Node[],
+): BoundaryFlowNode | null {
+  if (!view.scope || view.level === 'deployment') return null;
   const scope = model.elements[view.scope];
   if (!scope) return null;
   const inside = new Set(descendantsOf(model, view.scope));
@@ -239,7 +287,12 @@ export function deriveBoundary(model: Model, view: View, nodes: readonly Node[])
  */
 export type EdgeFlow = 'out' | 'out-reverse' | 'in';
 
-function flowOf(source: Id, target: Id, bidirectional: boolean, selected: ReadonlySet<Id>): EdgeFlow | null {
+function flowOf(
+  source: Id,
+  target: Id,
+  bidirectional: boolean,
+  selected: ReadonlySet<Id>,
+): EdgeFlow | null {
   if (!selected.size) return null;
   if (selected.has(source)) return 'out';
   if (selected.has(target)) return bidirectional ? 'out-reverse' : 'in';
@@ -287,12 +340,21 @@ export function deriveEdges(
           bidirectional,
           flow: flowOf(a, b, bidirectional, selectedNodes),
           fresh: fresh.has(rel.id),
+          ...(view.level === 'deployment' && isNetworkRelation(model, rel)
+            ? { network: true }
+            : {}),
         },
       });
     } else {
       const key = pairKey(a, b);
       const entry = implied.get(key);
-      if (!entry) implied.set(key, { from: a, to: b, relations: [rel], both: rel.direction === 'bidirectional' });
+      if (!entry)
+        implied.set(key, {
+          from: a,
+          to: b,
+          relations: [rel],
+          both: rel.direction === 'bidirectional',
+        });
       else {
         entry.relations.push(rel);
         if (entry.from !== a || rel.direction === 'bidirectional') entry.both = true;
@@ -320,5 +382,120 @@ export function deriveEdges(
       },
     });
   }
+
+  // Despliegue: relaciones lógicas entre las instancias que no tienen un camino de red dibujado.
+  if (view.level === 'deployment') {
+    const explicit = out.map((e) => ({
+      from: e.source,
+      to: e.target,
+      relations: e.data!.relations,
+      implied: e.data!.implied,
+      bidirectional: e.data!.bidirectional,
+    }));
+    for (const p of projectedEdges(model, view, explicit)) {
+      const id = `${PROJECTED_PREFIX}${p.from}>${p.to}`;
+      out.push({
+        id,
+        type: 'relation',
+        source: p.from,
+        target: p.to,
+        selected: selectedEdges.has(id),
+        deletable: false,
+        data: {
+          relations: p.relations,
+          implied: false,
+          projected: true,
+          shape: view.edges?.[p.relations[0]!.id]?.shape ?? 'curved',
+          bidirectional: p.bidirectional,
+          flow: flowOf(p.from, p.to, p.bidirectional, selectedNodes),
+          fresh: false,
+        },
+      });
+    }
+  }
+  placeEdgeLabels(model, view, out);
   return out;
+}
+
+/** Puntos del trazo donde se prueba la etiqueta: primero el medio, después hacia los extremos. */
+const LABEL_SPOTS = [0.5, 0.42, 0.58, 0.34, 0.66, 0.27, 0.73, 0.2, 0.8];
+/** Aire alrededor de la etiqueta al comparar con nodos y con otras etiquetas. */
+const LABEL_AIR = 6;
+const CELL = 256;
+
+/**
+ * Ubica la etiqueta de cada flecha donde no tape un nodo ni otra etiqueta: la prueba en el medio
+ * del trazo y, si choca, la corre a lo largo de la curva. Las flechas cortas eligen primero (tienen
+ * menos lugar); las largas se acomodan después. Si no hay ningún lugar libre, queda donde tapa menos.
+ */
+function placeEdgeLabels(model: Model, view: View, edges: RelationFlowEdge[]): void {
+  const rects = new Map<Id, Rect>();
+  for (const [id, layout] of Object.entries(view.nodes)) {
+    const el = model.elements[id];
+    if (el) rects.set(id, { x: layout.x, y: layout.y, ...sizeOf(el, layout) });
+  }
+  // Índice por celdas de lo que no se puede tapar: nodos (los marcos son fondo) y etiquetas ya ubicadas.
+  const grid = new Map<string, Rect[]>();
+  const cells = (r: Rect) => {
+    const keys: string[] = [];
+    for (let cx = Math.floor(r.x / CELL); cx <= Math.floor((r.x + r.w) / CELL); cx++) {
+      for (let cy = Math.floor(r.y / CELL); cy <= Math.floor((r.y + r.h) / CELL); cy++)
+        keys.push(`${cx},${cy}`);
+    }
+    return keys;
+  };
+  const add = (r: Rect) => {
+    for (const k of cells(r)) grid.set(k, [...(grid.get(k) ?? []), r]);
+  };
+  for (const [id, r] of rects) if (!isFrameKind(model.elements[id]!.kind)) add(r);
+  const covered = (r: Rect) => {
+    const seen = new Set<Rect>();
+    let area = 0;
+    for (const k of cells(r)) {
+      for (const o of grid.get(k) ?? []) {
+        if (seen.has(o)) continue;
+        seen.add(o);
+        const w = Math.min(r.x + r.w, o.x + o.w) - Math.max(r.x, o.x);
+        const h = Math.min(r.y + r.h, o.y + o.h) - Math.max(r.y, o.y);
+        if (w > 0 && h > 0) area += w * h;
+      }
+    }
+    return area;
+  };
+
+  const candidates = edges
+    .map((edge) => {
+      const s = rects.get(edge.source);
+      const t = rects.get(edge.target);
+      const size = edge.data ? edgeLabelSize(edge.data) : null;
+      if (!s || !t || !size || edge.data!.shape === 'step') return null;
+      const ends = floatingEnds(s, t);
+      return {
+        edge,
+        ends,
+        size,
+        length: Math.hypot(ends.targetX - ends.sourceX, ends.targetY - ends.sourceY),
+      };
+    })
+    .filter((c) => c !== null)
+    .sort((a, b) => a.length - b.length);
+
+  for (const { edge, ends, size } of candidates) {
+    let best: { t: number; rect: Rect; area: number } | null = null;
+    for (const t of LABEL_SPOTS) {
+      const p = pointOnEdge(edge.data!.shape, ends, t)!;
+      const rect = {
+        x: p.x - size.width / 2 - LABEL_AIR,
+        y: p.y - size.height / 2 - LABEL_AIR,
+        w: size.width + LABEL_AIR * 2,
+        h: size.height + LABEL_AIR * 2,
+      };
+      const area = covered(rect);
+      if (!best || area < best.area) best = { t, rect, area };
+      if (area === 0) break;
+    }
+    if (!best) continue;
+    if (best.t !== 0.5) edge.data!.labelT = best.t;
+    add(best.rect);
+  }
 }

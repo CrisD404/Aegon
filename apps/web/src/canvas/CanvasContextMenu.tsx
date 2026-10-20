@@ -26,6 +26,7 @@ import {
   Spline,
   Trash2,
   Wand2,
+  Server,
 } from 'lucide-react';
 import type { EdgeShape, Id } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
@@ -41,7 +42,7 @@ import {
   paste,
   removeSelectionFromView,
 } from '../lib/actions.ts';
-import { openTemplates, saveSelectionAsTemplate } from '../lib/flows.tsx';
+import { openNewDeploymentView, openTemplates, saveSelectionAsTemplate } from '../lib/flows.tsx';
 import { IMPLIED_PREFIX } from './derive.ts';
 import { addStep } from '../lib/flow-actions.ts';
 import { startCommentAt } from './Comments.tsx';
@@ -140,6 +141,20 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
           >
             {el.kind === 'system' ? 'Abrir contenedores (L2)' : 'Abrir componentes (L3)'}
           </Item>
+        ) : null}
+        {el.kind === 'system' && el.scope !== 'external' ? (
+          <>
+            {Object.values(model.views)
+              .filter((v) => v.level === 'deployment' && v.scope === el.id)
+              .map((v) => (
+                <Item key={v.id} icon={<Server size={14} />} onSelect={() => useUi.getState().openView(v.id, { transition: 'fade' })}>
+                  Abrir {v.name}
+                </Item>
+              ))}
+            <Item icon={<Server size={14} />} onSelect={() => void openNewDeploymentView(el.id)}>
+              Nuevo despliegue…
+            </Item>
+          </>
         ) : null}
         <Item icon={<Pencil size={14} />} shortcut="F2" onSelect={() => useUi.getState().requestRename()}>Renombrar</Item>
         <Item icon={<CopyPlus size={14} />} shortcut="Ctrl D" onSelect={duplicateSelection} disabled={el.kind === 'group'}>Duplicar</Item>

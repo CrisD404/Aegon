@@ -8,6 +8,7 @@ import {
 } from '../model/index.ts';
 import type { Element, ElementKind, Id, Level, NodeLayout, Relation, View } from '../schema/index.ts';
 import { childLevelOf } from '../rules/hierarchy.ts';
+import { projectedEdges } from '../deployment/index.ts';
 import type { Op } from './index.ts';
 
 /**
@@ -24,6 +25,9 @@ export const DEFAULT_SIZE: Readonly<Record<ElementKind, { w: number; h: number }
   store: { w: 220, h: 72 },
   bus: { w: 220, h: 72 },
   group: { w: 560, h: 320 },
+  node: { w: 560, h: 320 },
+  infra: { w: 220, h: 72 },
+  instance: { w: 220, h: 72 },
 };
 
 export const KIND_LABEL: Readonly<Record<ElementKind, string>> = {
@@ -34,11 +38,80 @@ export const KIND_LABEL: Readonly<Record<ElementKind, string>> = {
   store: 'Base de datos',
   bus: 'Bus de mensajería',
   group: 'Grupo',
+  node: 'Nodo de despliegue',
+  infra: 'Infraestructura',
+  instance: 'Instancia',
 };
 
-export function sizeOf(el: Pick<Element, 'kind'>, layout?: NodeLayout): { w: number; h: number } {
+/** Líneas de direcciones (IPs, hosts) que muestra un nodo de infraestructura o una instancia. */
+/** Alto de cada fila de direcciones en un nodo (px). */
+export const ADDRESS_ROW_HEIGHT = 15;
+const ADDRESS_MAX_ROWS = 6;
+
+/**
+ * Filas de direcciones (IPs, hosts, IDs) tal como las dibuja un nodo de ese ancho: se agrupan
+ * con " · " mientras entren en la línea y las largas se cortan en varias. Lo usan el lienzo (para
+ * dibujarlas) y `sizeOf` (para que el nodo tenga el alto justo).
+ */
+export function addressRows(items: readonly string[], width: number = DEFAULT_SIZE.infra.w): string[] {
+  // Fuente monoespaciada de 10.5 px (~6.35 px por carácter); el resto es chip, márgenes y separación.
+  const max = Math.max(12, Math.floor((width - 72) / 6.35));
+  const rows: string[] = [];
+  for (const raw of items) {
+    const parts: string[] = [];
+    for (let i = 0; i < raw.length; i += max) parts.push(raw.slice(i, i + max));
+    for (const part of parts) {
+      const last = rows[rows.length - 1];
+      if (last !== undefined && part.length === raw.length && last.length + 3 + part.length <= max) rows[rows.length - 1] = `${last} · ${part}`;
+      else rows.push(part);
+    }
+  }
+  if (rows.length > ADDRESS_MAX_ROWS) {
+    const kept = rows.slice(0, ADDRESS_MAX_ROWS);
+    kept[ADDRESS_MAX_ROWS - 1] = `${kept[ADDRESS_MAX_ROWS - 1]!.slice(0, max - 1)}…`;
+    return kept;
+  }
+  return rows;
+}
+
+/** Direcciones y recurso que muestra un nodo (en ese orden). */
+export function networkLabels(el: { addresses?: readonly string[]; resource?: string }): string[] {
+  return [...(el.addresses ?? []), ...(el.resource ? [el.resource] : [])];
+}
+
+/** Qué es cada tipo, en pocas palabras (para elegirlo al crear; entra en dos líneas). */
+export const KIND_DESCRIPTION: Readonly<Record<ElementKind, string>> = {
+  actor: 'Una persona o un rol que usa el sistema',
+  system: 'Un software completo, propio o de terceros',
+  container: 'Una app o servicio que se despliega por separado',
+  component: 'Una parte de un contenedor con una tarea clara',
+  store: 'Donde se guardan los datos: base, caché, archivos',
+  bus: 'Mensajes entre partes: colas, tópicos, streams',
+  group: 'Agrupa: una nube, una red, un dominio, un equipo',
+  node: 'Donde corre el software: datacenter, VPC, clúster',
+  infra: 'El camino del tráfico: firewall, DNS, balanceador',
+  instance: 'Un contenedor desplegado en un nodo de un ambiente',
+};
+
+/** Ejemplos de cada tipo (los dos primeros se ven en el menú de agregar; el resto, al pasar el mouse). */
+export const KIND_EXAMPLES: Readonly<Record<ElementKind, readonly string[]>> = {
+  actor: ['Cliente', 'Operador', 'Tótem de la sede'],
+  system: ['Home Banking', 'Entra ID', 'Core bancario'],
+  container: ['API de pagos', 'App web', 'Worker de conciliación'],
+  component: ['Controlador', 'Repositorio', 'Servicio de notificaciones'],
+  store: ['PostgreSQL', 'Redis', 'Bucket S3'],
+  bus: ['Kafka', 'Cola SQS', 'RabbitMQ'],
+  group: ['AWS', 'Red interna', 'Dominio Pagos'],
+  node: ['Datacenter', 'VPC QA', 'Clúster OpenShift', 'Namespace'],
+  infra: ['FortiGate', 'Route 53', 'ALB', 'Ingress del clúster'],
+  instance: ['Pod web', 'API en QA'],
+};
+
+export function sizeOf(el: Pick<Element, 'kind'> & { addresses?: readonly string[]; resource?: string }, layout?: NodeLayout): { w: number; h: number } {
   const def = DEFAULT_SIZE[el.kind];
-  return { w: layout?.w ?? def.w, h: layout?.h ?? def.h };
+  const w = layout?.w ?? def.w;
+  const extra = el.kind === 'infra' || el.kind === 'instance' ? addressRows(networkLabels(el), w).length * ADDRESS_ROW_HEIGHT : 0;
+  return { w, h: layout?.h ?? def.h + extra };
 }
 
 const isElementTaken = (model: Model) => (id: Id) => !!model.elements[id];
@@ -55,6 +128,8 @@ export function newElement(
   if (kind === 'store' && !base.store) base.store = { engine: 'other' };
   if (kind === 'bus' && !base.bus) base.bus = { broker: 'other' };
   if (kind === 'group' && !base.group) base.group = { provider: 'other' };
+  if (kind === 'node' && !base.node) base.node = { type: 'server' };
+  if (kind === 'infra' && !base.infra) base.infra = { type: 'other' };
   return base as unknown as Element;
 }
 
@@ -152,6 +227,8 @@ export interface ViewEdge {
   /** True si algún extremo no está ubicado y se dibuja a través de un ancestro. */
   implied: boolean;
   bidirectional: boolean;
+  /** Solo despliegue: relación lógica proyectada sobre las instancias (no hay camino de red explícito). */
+  projected?: boolean;
 }
 
 /**
@@ -184,6 +261,12 @@ export function viewEdges(model: Model, view: View): ViewEdge[] {
   }
   for (const [key, entry] of implied) if (!directPairs.has(key)) out.push(entry);
   return out;
+}
+
+/** Todo lo que se dibuja en un lienzo: `viewEdges` más, en despliegue, las relaciones lógicas proyectadas. */
+export function allViewEdges(model: Model, view: View): ViewEdge[] {
+  const edges = viewEdges(model, view);
+  return view.level === 'deployment' ? [...edges, ...projectedEdges(model, view, edges)] : edges;
 }
 
 /** Igual que `representativeInView` pero para un lienzo de detalle que todavía no existe. */
@@ -313,10 +396,32 @@ export function duplicateOp(
   return { op: { type: 'batch', ops, label: 'Duplicar' }, ids: [...mapping.values()] };
 }
 
-/** Crea un lienzo L1 vacío con nombre único. */
-export function createViewOp(model: Model, name: string, level: Level = 1, scope?: Id): { op: Op; id: Id } {
+/** Crea un lienzo vacío con nombre único (L1 por defecto; en despliegue, para un ambiente). */
+export function createViewOp(model: Model, name: string, level: Level = 1, scope?: Id, environment?: Id): { op: Op; id: Id } {
   const id = idFromName(name, (v) => !!model.views[v], 'lienzo');
   const view: View = { id, name, level, nodes: {} };
   if (scope) view.scope = scope;
+  if (level === 'deployment' && environment) view.environment = environment;
   return { op: { type: 'view.add', view }, id };
+}
+
+/** Nombre por defecto de un lienzo de despliegue ("Home Banking · Despliegue QA"). */
+export function deploymentViewName(model: Model, environment: Id, scope?: Id): string {
+  const env = model.workspace.environments?.find((e) => e.id === environment)?.name ?? environment;
+  const system = scope ? model.elements[scope]?.name : undefined;
+  return system ? `${system} · Despliegue ${env}` : `Despliegue ${env}`;
+}
+
+/**
+ * Instancia nueva de un contenedor (o base, bus, sistema) en un nodo para un ambiente. Hereda
+ * el nombre del elemento desplegado; el ID lleva el ambiente (`web-app-qa`).
+ */
+export function newInstance(model: Model, of: Id, opts: { parent?: Id; environment?: Id; name?: string } = {}): Element {
+  const target = model.elements[of];
+  const name = opts.name ?? target?.name ?? of;
+  const id = uniqueId(opts.environment ? `${of}-${opts.environment}` : `${of}-instancia`, (x) => !!model.elements[x]);
+  const el: Record<string, unknown> = { id, kind: 'instance', name, instance: { of } };
+  if (opts.parent) el.parent = opts.parent;
+  if (opts.environment) el.environments = [opts.environment];
+  return el as unknown as Element;
 }

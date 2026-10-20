@@ -38,6 +38,11 @@
   font-size: 9px;
 }
 
+/* Abajo a la izquierda (la derecha es de la navegación), corrida para no quedar bajo la regla. */
+.react-flow__attribution.left {
+  margin-left: 26px;
+}
+
 .react-flow__attribution a {
   color: var(--fg-subtle);
 }
@@ -631,6 +636,28 @@
   pointer-events: none;
 }
 
+/*
+ * Espacio (mano): el arrastre siempre mueve la vista. Nodos, flechas, etiquetas y comentarios no
+ * reciben el mouse, así el gesto llega al fondo aunque empiece encima de ellos. (`!important`
+ * porque ReactFlow pone `pointer-events: all` inline en cada nodo.)
+ */
+.canvas-shell[data-space]
+  :is(.react-flow__node, .react-flow__edge, .react-flow__nodesselection, .c4-edge-label, .comment-anchor),
+.canvas-shell[data-space]
+  :is(.react-flow__node, .react-flow__edge, .react-flow__nodesselection, .c4-edge-label, .comment-anchor)
+  * {
+  /* También lo de adentro: el borde de un grupo o los handles tienen sus propios eventos. */
+  pointer-events: none !important;
+}
+
+.canvas-shell[data-space] .react-flow__pane {
+  cursor: grab;
+}
+
+.canvas-shell[data-space] .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
 /* Nivel de detalle por zoom (lo setea el lienzo en data-lod) ----------------------------------- */
 
 .c4-node--far {
@@ -671,20 +698,156 @@
   z-index: 1000;
 }
 
-.ghost-rect {
+/*
+ * Fantasma: vista previa del nodo que se va a crear, con el mismo dibujo que en el lienzo y
+ * escalada al zoom. El punto (left/top) es el centro; la caja cambia de tamaño con una transición
+ * al pasar de un tipo a otro y el contenido entra con un fundido.
+ */
+.ghost-preview {
   position: absolute;
-  border-radius: var(--radius-lg);
-  border: 1.5px dashed var(--accent);
-  background: var(--accent-soft);
+  width: 0;
+  height: 0;
   pointer-events: none;
+}
+
+.ghost-preview__box {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: var(--radius-md);
+  outline: calc(1.5px / var(--zoom)) dashed var(--accent);
+  outline-offset: calc(5px / var(--zoom));
+  transform: translate(-50%, -50%) scale(var(--zoom));
+  transform-origin: 50% 50%;
+  transition:
+    width 240ms var(--ease-out),
+    height 240ms var(--ease-out);
   animation:
-    aegon-pop-in var(--dur-2) var(--ease-out),
+    aegon-ghost-in 280ms var(--ease-spring),
     aegon-ghost-pulse 1.6s ease-in-out infinite;
+}
+
+.ghost-preview__swap {
+  width: 100%;
+  height: 100%;
+  opacity: 0.94;
+  animation: aegon-ghost-swap 240ms var(--ease-out);
+}
+
+.ghost-preview__example {
+  display: inline-block;
+  color: var(--fg-muted);
+  animation: aegon-ghost-example 360ms var(--ease-out);
+}
+
+/* Qué va a pasar ("Nuevo", "Ya existe · se ubica acá"…), arriba a la izquierda del fantasma. */
+.ghost-preview__tag {
+  position: absolute;
+  left: calc(var(--ghost-w) / -2);
+  top: calc(var(--ghost-h) / -2 - 28px);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 16px;
+  white-space: nowrap;
+  transition:
+    left 240ms var(--ease-out),
+    top 240ms var(--ease-out);
+  animation: aegon-ghost-in 280ms var(--ease-spring);
+}
+
+.ghost-preview__tag[data-align='end'] {
+  left: auto;
+  right: calc(var(--ghost-w) / -2);
+  transition:
+    right 240ms var(--ease-out),
+    top 240ms var(--ease-out);
+}
+
+.ghost-preview__tag > span {
+  display: inline-block;
+  animation: aegon-ghost-example 240ms var(--ease-out);
+}
+
+/* Bloque de template: tarjetas apiladas detrás de la principal. */
+.ghost-preview__stack {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.ghost-preview__stack::before,
+.ghost-preview__stack::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--node-border);
+  border-radius: var(--radius-md);
+  background: var(--node-bg);
+}
+
+.ghost-preview__stack::before {
+  transform: translate(14px, 14px);
+  opacity: 0.5;
+}
+
+.ghost-preview__stack::after {
+  transform: translate(7px, 7px);
+  opacity: 0.8;
+}
+
+.ghost-preview__stack > .c4-node {
+  z-index: 1;
+}
+
+@keyframes aegon-ghost-in {
+  from {
+    opacity: 0;
+    scale: 0.9;
+  }
+}
+
+@keyframes aegon-ghost-swap {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+}
+
+@keyframes aegon-ghost-example {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
 }
 
 @keyframes aegon-ghost-pulse {
   50% {
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghost-preview__box,
+  .ghost-preview__tag {
+    transition: none;
+    animation: none;
+  }
+  .ghost-preview__swap,
+  .ghost-preview__example,
+  .ghost-preview__tag[data-align='end'] {
+  left: auto;
+  right: calc(var(--ghost-w) / -2);
+  transition:
+    right 240ms var(--ease-out),
+    top 240ms var(--ease-out);
+}
+
+.ghost-preview__tag > span {
+    animation: none;
   }
 }
 
@@ -701,21 +864,88 @@
 
 /* Minimapa ------------------------------------------------------------------------------------- */
 
-.react-flow__minimap.c4-minimap {
-  /* Arriba a la derecha, debajo de la regla: abajo queda la barra del lienzo. */
-  margin: 40px 16px 0 0;
-  width: 200px;
-  height: 140px;
+/*
+ * Navegación: una sola tarjeta abajo a la derecha. Arriba el minimapa, abajo la barra de vista y
+ * zoom. Al ocultar el minimapa, su fila se pliega (grid 1fr → 0fr) y queda solo la barra.
+ */
+.canvas-nav {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 236px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--panel);
   box-shadow: var(--shadow-pop);
+}
+
+.canvas-nav__map {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms var(--ease-out),
+    opacity 160ms var(--ease-out);
+}
+
+.canvas-nav[data-open] .canvas-nav__map {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.canvas-nav__map-inner {
+  min-height: 0;
   overflow: hidden;
 }
 
-.c4-minimap .react-flow__minimap-mask {
-  stroke: var(--accent);
-  stroke-width: 2;
+.canvas-nav__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 4px;
+}
+
+.canvas-nav[data-open] .canvas-nav__bar {
+  border-top: 1px solid var(--line);
+}
+
+/* El minimapa vive dentro de la tarjeta: sin la posición, el borde ni la sombra de un panel suelto. */
+.canvas-nav .react-flow__minimap.c4-minimap {
+  position: relative;
+  inset: auto;
+  margin: 4px;
+  border-radius: calc(var(--radius-lg) - 4px);
+  background: var(--raised);
+  overflow: hidden;
+}
+
+.canvas-nav .react-flow__minimap svg {
+  display: block;
+  background: var(--raised);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-nav__map {
+    transition: none;
+  }
+}
+
+/*
+ * Con el lienzo angosto (explorador e inspector abiertos), el deck se centra en el espacio que deja
+ * libre la navegación (236 px + 16 px de margen + 16 px de aire) para no pegarse a ella.
+ */
+.canvas-shell {
+  container-type: inline-size;
+}
+
+@container (max-width: 1240px) {
+  .canvas-dock {
+    left: calc((100% - 268px) / 2);
+  }
 }
 
 /* Resaltado (búsqueda y modo foco): las reglas las genera el lienzo; acá solo la transición. */
@@ -997,4 +1227,240 @@
   border: 0;
   box-shadow: none;
   animation: none;
+}
+
+/* Despliegue ------------------------------------------------------------------------------------ */
+/*
+ * Nodos de despliegue: marcos sólidos (infraestructura real, a diferencia de los grupos punteados)
+ * con encabezado de tres líneas: nombre, qué es (tipo · tecnología · tamaño) y sus IDs/direcciones.
+ * La infraestructura (firewall, DNS, balanceador…) lleva su propio color; una instancia toma el
+ * color de lo que despliega y, si tiene réplicas, se ve como una pila de tarjetas.
+ */
+
+.c4-node[data-kind='infra'] {
+  --kind: var(--kind-infra);
+}
+.c4-chip[data-kind='infra'] {
+  --kind: var(--kind-infra);
+  border-radius: 10px 10px 14px 14px;
+}
+.c4-chip[data-kind='node'] {
+  --kind: var(--kind-node);
+}
+
+.c4-chip-wrap {
+  position: relative;
+  display: grid;
+  flex: none;
+}
+
+/* Marca de instancia: un punto en la esquina del chip ("una copia corriendo"). */
+.c4-chip-wrap[data-instance]::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--kind, var(--kind-container));
+  border: 2px solid var(--node-bg);
+}
+
+.c4-node[data-instance] .c4-chip-wrap::after {
+  background: var(--kind);
+}
+
+.c4-node[data-replicas] {
+  box-shadow:
+    4px 4px 0 -1px var(--node-bg),
+    4px 4px 0 0 var(--node-border),
+    var(--node-shadow);
+}
+
+.c4-node__replicas {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+}
+
+.c4-node__addr {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--fg-muted);
+}
+
+.c4-node__addr > div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c4-deploy {
+  --provider: var(--kind-node);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-radius: var(--radius-lg);
+  border: 1.25px solid color-mix(in srgb, var(--provider) 38%, var(--line));
+  background: color-mix(in srgb, var(--kind-node) 4%, transparent);
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    background var(--dur-2) var(--ease-out);
+}
+
+.c4-deploy[data-provider='aws'] {
+  --provider: var(--provider-aws);
+}
+.c4-deploy[data-provider='gcp'] {
+  --provider: var(--provider-gcp);
+}
+.c4-deploy[data-provider='azure'] {
+  --provider: var(--provider-azure);
+}
+.c4-deploy[data-provider='onprem'] {
+  --provider: var(--provider-onprem);
+}
+.c4-deploy[data-provider='openshift'] {
+  --provider: var(--provider-openshift);
+}
+.c4-deploy[data-provider='kubernetes'] {
+  --provider: var(--provider-kubernetes);
+}
+
+.c4-deploy[data-status='planned'] {
+  border-style: dashed;
+}
+
+.c4-deploy[data-drop-target],
+.c4-group[data-drop-target] {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.c4-deploy[data-new] {
+  animation: aegon-node-in var(--dur-3) var(--ease-spring);
+}
+
+.c4-deploy__head {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.c4-deploy__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--provider);
+  background: color-mix(in srgb, var(--provider) 12%, var(--canvas));
+}
+
+.c4-deploy__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.c4-deploy__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 16px;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.c4-deploy__count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+}
+
+.c4-deploy__caption {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c4-deploy__ids {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 14px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.react-flow__node-deployment {
+  pointer-events: none !important;
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+.react-flow__node-deployment .c4-deploy__edge,
+.react-flow__node-deployment .react-flow__resize-control,
+.react-flow__node-deployment .react-flow__handle,
+.react-flow__node-deployment.selected .c4-deploy {
+  pointer-events: all;
+}
+
+.react-flow__node-deployment.selected .c4-deploy {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Borde "agarrable" del marco y su encabezado (el interior deja pasar clicks al lienzo). */
+.c4-deploy__edge {
+  position: absolute;
+  inset: -6px;
+  border-radius: calc(var(--radius-lg) + 6px);
+  border: 8px solid transparent;
+}
+
+.react-flow__node-deployment .c4-deploy__head {
+  pointer-events: all;
+  right: auto;
+  max-width: calc(100% - 24px);
+}
+
+.react-flow[data-lod='far'] .c4-deploy__caption,
+.react-flow[data-lod='far'] .c4-deploy__ids {
+  display: none;
+}
+
+/* Tramos de red en el despliegue: azules y punteados (como en los diagramas de infraestructura). */
+.c4-edge-path[data-network] {
+  stroke: color-mix(in srgb, var(--edge-network) 75%, var(--edge));
+  stroke-dasharray: 7 5;
+}
+
+.c4-edge-label[data-network] .tech {
+  color: color-mix(in srgb, var(--edge-network) 80%, var(--fg-muted));
+}
+
+.c4-arrow-network {
+  fill: color-mix(in srgb, var(--edge-network) 75%, var(--edge));
 }

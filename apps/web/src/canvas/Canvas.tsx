@@ -18,7 +18,6 @@ import {
   applyNodeChanges,
   useNodesInitialized,
   useReactFlow,
-  MiniMap,
   getViewportForBounds,
   useStore,
   type Connection,
@@ -28,13 +27,14 @@ import {
   type NodePositionChange,
   type EdgeChange,
 } from '@xyflow/react';
-import { sizeOf, type ElementKind, type Id, type NodeLayout, type Op } from '@aegon/core';
+import { canHaveParent, sizeOf, type Element, type ElementKind, type Id, type NodeLayout, type Op } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
-import { connect, drillInto, placeExisting } from '../lib/actions.ts';
+import { connect, drillInto, placeExisting, revealElement } from '../lib/actions.ts';
 import { computeGuides, contains, type GuideLine } from '../lib/geometry.ts';
 import {
   BOUNDARY_PREFIX,
+  FRAME_NODE_TYPES,
   absoluteRects,
   deriveBoundary,
   deriveEdges,
@@ -44,11 +44,13 @@ import {
 } from './derive.ts';
 import { ElementNode } from './nodes/ElementNode.tsx';
 import { BoundaryNode, GroupNode } from './nodes/GroupNode.tsx';
+import { DeploymentNode } from './nodes/DeploymentNode.tsx';
 import { EdgeMarkers, RelationEdge } from './edges/RelationEdge.tsx';
-import { GhostPicker } from './GhostPicker.tsx';
+import { GHOST_PANEL_WIDTH, GhostPicker } from './GhostPicker.tsx';
 import { Rulers } from './Rulers.tsx';
 import { CanvasContextMenu, type ContextTarget } from './CanvasContextMenu.tsx';
 import { CanvasDock } from './CanvasDock.tsx';
+import { CanvasNav } from './CanvasNav.tsx';
 import { SelectionToolbar } from './SelectionToolbar.tsx';
 import { EmptyHint } from './EmptyHint.tsx';
 import { DRAG_MIME, canvasApi } from './api.ts';
@@ -62,12 +64,12 @@ import { CommentPlacer, CommentsLayer, StepPicker } from './Comments.tsx';
 
 /** Color de cada nodo en el minimapa: el de su tipo (los grupos, solo el contorno del marco). */
 function minimapColor(node: Node): string {
-  if (node.type === 'boundary' || node.type === 'group') return 'transparent';
+  if (node.type === 'boundary' || node.type === 'group' || node.type === 'deployment') return 'transparent';
   const kind = (node.data as { element?: { kind?: string } }).element?.kind ?? 'system';
   return `var(--kind-${kind})`;
 }
 
-const nodeTypes = { element: ElementNode, group: GroupNode, boundary: BoundaryNode };
+const nodeTypes = { element: ElementNode, group: GroupNode, deployment: DeploymentNode, boundary: BoundaryNode };
 const edgeTypes = { relation: RelationEdge };
 
 const LOD_STEPS: [maxZoom: number, lod: string][] = [
@@ -130,7 +132,6 @@ export function Canvas() {
   const grid = useUi((s) => s.grid);
   const snap = useUi((s) => s.snap);
   const rulers = useUi((s) => s.rulers);
-  const minimap = useUi((s) => s.minimap);
   const presenting = useUi((s) => !!s.player);
   const theme = useUi((s) => s.resolvedTheme);
   const transition = useUi((s) => s.transition);
@@ -253,19 +254,19 @@ export function Canvas() {
       if (Object.keys(placements).length)
         ops.push({ type: 'view.place', view: v.id, nodes: placements });
 
-      // Membresía: el grupo más chico que contiene el centro del nodo soltado.
-      const groupNodes = current.filter((n) => n.type === 'group');
+      // Membresía: el marco más chico que contiene el centro del nodo soltado (un grupo, o un
+      // nodo de despliegue para lo que se despliega).
       for (const d of dragged) {
         const el = m.elements[d.id];
         const r = rects.get(d.id);
         if (!el || !r) continue;
         const c = { x: r.x + r.w / 2, y: r.y + r.h / 2 };
         const excluded = new Set([d.id]);
-        if (el.kind === 'group')
+        if (FRAME_NODE_TYPES.has(d.type ?? ''))
           for (const n of current) if (isDescendant(current, n.id, d.id)) excluded.add(n.id);
         let best: { id: Id; area: number } | null = null;
-        for (const g of groupNodes) {
-          if (excluded.has(g.id)) continue;
+        for (const g of current) {
+          if (g.type !== frameTypeFor(el) || excluded.has(g.id)) continue;
           const gr = rects.get(g.id)!;
           if (contains(gr, c) && (!best || gr.w * gr.h < best.area))
             best = { id: g.id, area: gr.w * gr.h };
@@ -273,7 +274,11 @@ export function Canvas() {
         const target = best?.id;
         const currentParent = d.parentId;
         if (target === currentParent) continue;
-        if (el.kind === 'group') {
+        if (el.kind === 'group' || el.kind === 'node' || el.kind === 'infra' || el.kind === 'instance') {
+          const parent = target ? m.elements[target] : undefined;
+          if (parent && !canHaveParent(el.kind, parent.kind)) continue;
+          // Un nodo fuera de todo marco conserva su padre si ese padre no está en este lienzo.
+          if (!target && el.parent && !v.nodes[el.parent]) continue;
           ops.push({ type: 'element.update', id: el.id, patch: { parent: target ?? null } });
         } else {
           const kept = (el.groups ?? []).filter((g) => !v.nodes[g]);
@@ -386,12 +391,13 @@ export function Canvas() {
       if (moving.length) {
         const rects = absoluteRects(next);
         const first = rects.get(moving[0]!.id);
-        if (first) {
+        const draggedEl = useWorkspace.getState().model.elements[moving[0]!.id];
+        if (first && draggedEl) {
           const c = { x: first.x + first.w / 2, y: first.y + first.h / 2 };
           let best: { id: Id; area: number } | null = null;
           for (const n of next) {
             if (
-              n.type !== 'group' ||
+              n.type !== frameTypeFor(draggedEl) ||
               moving.some((m) => m.id === n.id || isDescendant(next, n.id, m.id))
             )
               continue;
@@ -442,7 +448,18 @@ export function Canvas() {
     [openGhost],
   );
 
-  const onNodeDoubleClick = useCallback(async (_e: ReactMouseEvent, node: Node) => {
+  const onNodeDoubleClick = useCallback(async (e: ReactMouseEvent, node: Node) => {
+    // En el interior de un marco (nodo de despliegue o grupo) se crea adentro; en su encabezado, se renombra.
+    if ((node.type === 'deployment' || node.type === 'group') && !(e.target as HTMLElement).closest('.c4-deploy__head, .c4-group__label')) {
+      openGhost(e.clientX, e.clientY);
+      return;
+    }
+    // Una instancia lleva a lo que despliega (su contenedor en el lienzo de contenedores).
+    const el = (node.data as { element?: Element }).element;
+    if (el?.kind === 'instance') {
+      revealElement(el.instance.of);
+      return;
+    }
     if (node.type === 'element' && (node.data as { canDrill?: boolean }).canDrill) {
       await canvasApi.zoomToNode(node.id);
       drillInto(node.id);
@@ -452,7 +469,7 @@ export function Canvas() {
       useUi.getState().select([node.id]);
       useUi.getState().requestRename();
     }
-  }, []);
+  }, [openGhost]);
 
   // --- Conexiones ---------------------------------------------------------------------------
   const onConnect = useCallback((c: Connection) => {
@@ -589,7 +606,7 @@ export function Canvas() {
             if (!a) return n;
             const p = n.parentId ? abs.get(n.parentId) : undefined;
             const position = { x: a.x - (p?.x ?? 0), y: a.y - (p?.y ?? 0) };
-            return n.type === 'group'
+            return n.type === 'group' || n.type === 'deployment'
               ? ({ ...n, position, width: a.w, height: a.h } as AegonNode)
               : ({ ...n, position } as AegonNode);
           });
@@ -627,20 +644,103 @@ export function Canvas() {
     };
     canvasApi.zoomIn = () => void rf.zoomIn({ duration: 180 });
     canvasApi.zoomOut = () => void rf.zoomOut({ duration: 180 });
+    canvasApi.zoomReset = () => void rf.zoomTo(1, { duration: 220 });
+    // "Agregar" (deck, N): el fantasma va al lugar libre más cercano al centro de la vista, sin
+    // pisar elementos ni quedar bajo el deck. Si no hay lugar, al centro.
     canvasApi.ghostAtCenter = (kind) => {
       const b = shellRef.current?.getBoundingClientRect();
-      if (b) openGhost(b.left + b.width / 2, b.top + b.height / 2, kind ? { kind } : {});
+      if (!b) return;
+      const zoom = rf.getZoom();
+      const size = sizeOf({ kind: kind ?? 'system' });
+      const w = size.w * zoom;
+      const h = size.h * zoom;
+      const gap = Math.max(12, 32 * zoom);
+      const taken = rf
+        .getNodes()
+        .filter((n) => n.type === 'element')
+        .map((n) => {
+          const i = rf.getInternalNode(n.id);
+          const p = rf.flowToScreenPosition(i?.internals.positionAbsolute ?? n.position);
+          return { x: p.x, y: p.y, w: (i?.measured.width ?? 0) * zoom, h: (i?.measured.height ?? 0) * zoom };
+        });
+      const free = (cx: number, cy: number) =>
+        cx - w / 2 >= b.left + 48 &&
+        cx + w / 2 <= b.right - 48 &&
+        cy - h / 2 >= b.top + 48 &&
+        cy + h / 2 <= b.bottom - 96 &&
+        taken.every((r) => cx + w / 2 + gap <= r.x || cx - w / 2 - gap >= r.x + r.w || cy + h / 2 + gap <= r.y || cy - h / 2 - gap >= r.y + r.h);
+      // Mejor si además entra el menú al costado (así no tapa el fantasma).
+      const besidePanel = (cx: number) => cx + w / 2 + 14 + GHOST_PANEL_WIDTH <= b.right - 12 || cx - w / 2 - 14 - GHOST_PANEL_WIDTH >= b.left + 12;
+      const c = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      const STEP = 24;
+      const nearest = (ok: (x: number, y: number) => boolean) => {
+        for (let ring = 0; ring <= 40; ring++) {
+          let best: { x: number; y: number; d: number } | null = null;
+          for (let dx = -ring; dx <= ring; dx++) {
+            for (let dy = -ring; dy <= ring; dy++) {
+              if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+              const x = c.x + dx * STEP;
+              const y = c.y + dy * STEP;
+              const d = Math.hypot(dx, dy);
+              if ((!best || d < best.d) && ok(x, y)) best = { x, y, d };
+            }
+          }
+          if (best) return best;
+        }
+        return null;
+      };
+      const spot = nearest((x, y) => free(x, y) && besidePanel(x)) ?? nearest(free) ?? c;
+      openGhost(spot.x, spot.y, kind ? { kind } : {});
     };
   }, [rf, openGhost]);
+
+  // Espacio = mano: mientras se mantiene, arrastrar mueve la vista aunque se empiece sobre un nodo
+  // o una flecha (canvas.css les saca los eventos del mouse con `data-space`).
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const editable = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null;
+      return !!el && (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT');
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || editable(e.target)) return;
+      // Con el mouse sobre el lienzo, el espacio es la mano: no activa el botón que tenga el foco.
+      if (shell.matches(':hover')) e.preventDefault();
+      shell.setAttribute('data-space', '');
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === 'Space') shell.removeAttribute('data-space');
+    };
+    const reset = () => shell.removeAttribute('data-space');
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', reset);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', reset);
+    };
+  }, [viewId]);
 
   // Mientras se mueve la vista, los nodos no reciben hover (ver canvas.css).
   const onMoveStart = useCallback(() => shellRef.current?.setAttribute('data-moving', ''), []);
   const onMoveEnd = useCallback(() => shellRef.current?.removeAttribute('data-moving'), []);
 
   const framedView = useRef<string | null>(null);
+  const isEmptyView = !!view && Object.keys(view.nodes).length === 0;
   // Encuadrar recién cuando ReactFlow midió los nodos: antes, fitView se encola y se aplica tarde.
   const nodesInitialized = useNodesInitialized();
   useEffect(() => {
+    // Un lienzo vacío no tiene nada que encuadrar: queda listo enseguida (se decide por el lienzo,
+    // no por `nodes`, que en el primer render todavía puede traer los del lienzo anterior).
+    if (viewId && isEmptyView) {
+      if (framedView.current !== `${viewId}:${focusId ?? ''}`) {
+        framedView.current = `${viewId}:${focusId ?? ''}`;
+        shellRef.current?.setAttribute('data-framed', viewId);
+      }
+      return;
+    }
     if (
       !viewId ||
       !nodes.length ||
@@ -672,7 +772,7 @@ export function Canvas() {
         setTimeout(() => shellRef.current?.setAttribute('data-framed', viewId), 300),
       );
     });
-  }, [viewId, focusId, nodes.length, nodesInitialized, rf, transition]);
+  }, [viewId, focusId, nodes.length, nodesInitialized, rf, transition, isEmptyView]);
 
   useEffect(() => {
     if (!viewId) framedView.current = null;
@@ -692,7 +792,6 @@ export function Canvas() {
       onDrop={onDrop}
       data-testid="canvas"
     >
-      <EdgeMarkers />
       <CanvasContextMenu target={ctx} onOpenGhost={(x, y) => openGhost(x, y)}>
         <LodContext.Provider value={lodName as Lod}>
           <ReactFlow<AegonNode, RelationFlowEdge>
@@ -740,6 +839,7 @@ export function Canvas() {
             elevateNodesOnSelect={false}
             fitView={false}
             proOptions={{ hideAttribution: false }}
+            attributionPosition="bottom-left"
             data-lod={lodName}
             style={{ ['--lod-scale' as string]: lodScale }}
           >
@@ -753,22 +853,11 @@ export function Canvas() {
               />
             ) : null}
             <ViewportPortal>
+              {/* Dentro del viewport: así las flechas viajan con la imagen al exportar. */}
+              <EdgeMarkers />
               <GuideLines guides={guides} />
             </ViewportPortal>
             <SelectionToolbar />
-            {minimap && !presenting ? (
-              <MiniMap
-                pannable
-                zoomable
-                position="top-right"
-                className="c4-minimap"
-                nodeColor={minimapColor}
-                nodeStrokeWidth={0}
-                nodeBorderRadius={6}
-                maskColor="var(--minimap-mask)"
-                ariaLabel="Minimapa"
-              />
-            ) : null}
             <DropTargetMarker id={dropTarget} />
             {view ? <FlowOverlay view={view} /> : null}
             {view ? <CommentsLayer view={view} /> : null}
@@ -785,6 +874,7 @@ export function Canvas() {
       <StepPicker />
       <FlowPlayer />
       {!presenting ? <CanvasDock /> : null}
+      {!presenting ? <CanvasNav nodeColor={minimapColor} /> : null}
     </div>
   );
 }
@@ -820,11 +910,16 @@ function isDescendant(nodes: readonly Node[], id: string, ancestor: string): boo
   return false;
 }
 
-/** Marca el grupo donde caerá el nodo arrastrado (atributo en el DOM, sin re-render de nodos). */
+/** Tipo de marco donde puede caer un elemento: nodos de despliegue o grupos. */
+function frameTypeFor(el: Element): 'group' | 'deployment' {
+  return el.kind === 'node' || el.kind === 'infra' || el.kind === 'instance' ? 'deployment' : 'group';
+}
+
+/** Marca el marco donde caerá el nodo arrastrado (atributo en el DOM, sin re-render de nodos). */
 function DropTargetMarker({ id }: { id: Id | null }) {
   useEffect(() => {
     if (!id) return;
-    const el = document.querySelector(`[data-testid="group-${CSS.escape(id)}"]`);
+    const el = document.querySelector(`[data-frame-id="${CSS.escape(id)}"]`);
     el?.setAttribute('data-drop-target', '');
     return () => el?.removeAttribute('data-drop-target');
   }, [id]);

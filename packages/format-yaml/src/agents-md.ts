@@ -10,7 +10,8 @@ export const GITIGNORE = `# Aegon: estado local de borrador y recuperación (no 
 export function agentsMd(workspaceName: string): string {
   return `# ${workspaceName} — guía para agentes
 
-Este repositorio es un workspace de **Aegon**: arquitectura C4 (niveles 1 a 3) guardada como código.
+Este repositorio es un workspace de **Aegon**: arquitectura C4 (niveles 1 a 3 y despliegue por ambiente)
+guardada como código.
 La app de Aegon lee y escribe estos archivos; vos también podés editarlos directamente.
 
 ## Estructura
@@ -42,6 +43,9 @@ attachments/                 # adjuntos que Aegon conserva tal cual
 | \`store\` | 1–3 | system o container | \`store: { engine, type, version, managed }\` (\`engine: other\` + \`customEngine\`), \`risk\` |
 | \`bus\` | 1–3 | system | \`bus: { broker, type, topics }\` (kafka, rabbitmq, sqs…; \`broker: other\` + \`customBroker\`), \`risk\` |
 | \`group\` | 1–3 | group | \`group: { provider: aws\\|gcp\\|azure\\|onprem\\|network\\|platform\\|other, region, account, cidr }\` |
+| \`node\` | despliegue | node | \`node: { type, provider, region, account, size, instances }\`, \`technology\`, \`addresses\`, \`resource\` |
+| \`infra\` | despliegue | node | \`infra: { type }\` (firewall, load-balancer, dns, gateway, ingress, egress, nat, vpn, link, security-group, waf, cdn, proxy, router, other), \`technology\`, \`addresses\`, \`resource\` |
+| \`instance\` | despliegue | node | \`instance: { of, replicas }\` (\`of\`: el container, store, bus o system que despliega), \`addresses\`, \`resource\` |
 
 Campos comunes: \`name\`, \`description\` (corta), \`docs\` (Markdown), \`groups\` (IDs de grupos),
 \`scope\` (internal/external), \`status\` (planned/live/deprecated/retired), \`tags\`, \`owner\`, \`links\`,
@@ -80,6 +84,36 @@ finops:
 Los costos van en los elementos desplegables (contenedores, bases, buses); un sistema suma los de
 sus hijos. Los actores no tienen costos. Solo usá IDs de ambientes que existan en \`aegon.yaml\`.
 
+### Despliegue
+
+Dónde y cómo corre el software en cada ambiente (C4 deployment):
+
+- \`node\`: algo que aloja software (datacenter, nube, VPC, clúster, namespace, servidor, VM). Se
+  anidan con \`parent\` (\`Datacenter > OCP > namespace BANCA\`). \`node.type\`: datacenter, cloud, region,
+  zone, network, subnet, cluster, namespace, server, vm, runtime, device u other.
+- \`infra\`: infraestructura por la que pasa el tráfico (firewall, DNS, balanceador, ingress/egress,
+  enlace dedicado, security group…).
+- \`instance\`: un contenedor (o base, bus, sistema) desplegado en un nodo: \`instance.of\` apunta al
+  elemento lógico. Las relaciones entre contenedores **no se repiten**: Aegon las dibuja solas entre
+  sus instancias, salvo que el lienzo ya muestre un camino de red explícito entre ellas.
+- \`addresses\`: IPs, CIDRs, hostnames o URLs (\`10.20.30.85\`, \`banca-qa.apps.ocp.example:8080\`).
+  \`resource\`: ID del recurso en el proveedor (\`vpc-0a1b…\`, \`i-0123…\`, un ARN).
+- \`environments\` dice en qué ambientes existe cada nodo, infraestructura o instancia (sin el campo:
+  en todos, por ejemplo un datacenter compartido). Una instancia suele ser de un solo ambiente
+  (\`web-app-qa\`).
+- Las relaciones de red (actor → firewall → balanceador → instancia) son relaciones comunes entre
+  esos elementos; pueden apuntar a un \`node\` (por ejemplo, a la VPC).
+
+\`\`\`yaml
+# model/elements/web-app-qa.yaml
+id: web-app-qa
+kind: instance
+name: Web App
+parent: namespace-banca
+instance: { of: web-app, replicas: 2 }
+environments: [qa]
+\`\`\`
+
 ## Relaciones
 
 \`\`\`yaml
@@ -94,7 +128,8 @@ protocols: [jdbc]
 - **Una relación por par de elementos.** Si la comunicación va en ambos sentidos usá
   \`direction: bidirectional\` en vez de dos relaciones.
 - \`protocols\` usa los IDs del catálogo de Aegon (\`https\`, \`rest\`, \`grpc\`, \`graphql\`, \`kafka\`,
-  \`amqp\`, \`jdbc\`, \`sql\`, \`resp\`, \`s3-api\`, \`sftp\`, \`oidc\`…).
+  \`amqp\`, \`jdbc\`, \`sql\`, \`tds\`, \`resp\`, \`s3-api\`, \`sftp\`, \`oidc\`, \`tcp\`, \`bgp\`…) y \`ports\` los
+  puertos de destino (\`ports: [443, 80]\`).
 - Conectá los elementos más específicos posibles (container → container). Aegon dibuja las
   relaciones implícitas en los niveles superiores (sistema → sistema) automáticamente.
 
@@ -115,8 +150,8 @@ Un comentario (\`comments/<id>.yaml\`) está en un \`view\`, en \`x\`/\`y\` (rel
 # views/payments-containers.yaml
 id: payments-containers
 name: Payments · Contenedores
-level: 2            # 1 = contexto, 2 = contenedores, 3 = componentes
-scope: payments     # system en L2, container en L3; vacío en L1
+level: 2            # 1 = contexto, 2 = contenedores, 3 = componentes, deployment = despliegue
+scope: payments     # system en L2, container en L3; vacío en L1; en despliegue, el sistema (opcional)
 nodes:              # posición (esquina superior izquierda) de cada elemento ubicado
   payments-api: { x: 0, y: 0 }
   payments-db: { x: 320, y: 0, w: 224, h: 120 }
@@ -128,6 +163,8 @@ edges:              # opcional: estilo de las relaciones que se apartan del defa
 
 - Cada \`parent\`, \`groups\`, \`from\`, \`to\`, \`scope\` y clave de \`nodes\` debe apuntar a un elemento existente.
 - Los grupos no tienen relaciones. Un lienzo L2 abre un \`system\`; uno L3 abre un \`container\`.
+- Un lienzo \`level: deployment\` necesita \`environment\` (un ambiente de \`aegon.yaml\`) y ubica
+  nodos, infraestructura, instancias, actores y sistemas externos.
 - Los JSON Schema del formato están en la documentación de Aegon (\`docs/schema/*.schema.json\`).
 
 ## Herramientas

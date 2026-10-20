@@ -2,7 +2,7 @@ import { idFromName, relationIdFor, uniqueId } from '../ids/index.ts';
 import { descendantsOf, type Model } from '../model/index.ts';
 import { OpError, type Op } from '../ops/index.ts';
 import { KIND_LABEL, scopedParentFor, sizeOf } from '../ops/commands.ts';
-import { KINDS_FOR_LEVEL } from '../rules/hierarchy.ts';
+import { KINDS_FOR_LEVEL, levelRank } from '../rules/hierarchy.ts';
 import { SCHEMA_VERSION, type EdgeStyle, type Element, type Id, type Level, type NodeLayout, type Relation, type View } from '../schema/index.ts';
 
 /**
@@ -42,7 +42,7 @@ export function templateMainView(template: Template): View | undefined {
   const { views, workspace } = template.model;
   if (template.kind === 'block') return views[BLOCK_VIEW];
   if (workspace.defaultView && views[workspace.defaultView]) return views[workspace.defaultView];
-  return Object.values(views).sort((a, b) => a.level - b.level || a.id.localeCompare(b.id))[0];
+  return Object.values(views).sort((a, b) => levelRank(a.level) - levelRank(b.level) || a.id.localeCompare(b.id))[0];
 }
 
 export function templateStats(template: Template): TemplateStats {
@@ -53,7 +53,7 @@ export function templateStats(template: Template): TemplateStats {
   };
 }
 
-const LEVEL_NAME: Record<Level, string> = { 1: 'contexto (L1)', 2: 'contenedores (L2)', 3: 'componentes (L3)' };
+const LEVEL_NAME: Record<Level, string> = { 1: 'contexto (L1)', 2: 'contenedores (L2)', 3: 'componentes (L3)', deployment: 'despliegue' };
 
 /** Motivo por el que un bloque no se puede insertar en un lienzo (o null si se puede). */
 export function blockProblem(template: Template, view: View): string | null {

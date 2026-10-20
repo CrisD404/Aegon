@@ -26,6 +26,15 @@
     "architect": {
       "type": "string"
     },
+    "code": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string"
+    },
     "defaultView": {
       "type": "string",
       "minLength": 1,

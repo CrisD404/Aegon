@@ -39,9 +39,17 @@ export function stepElements(step: FlowStep | LeafStep): Id[] {
 export function relationForStep(model: Model, step: LeafStep): Relation | undefined {
   if (step.type !== 'message') return undefined;
   if (step.relation && model.relations[step.relation]) return model.relations[step.relation];
-  return Object.values(model.relations).find(
-    (r) => (r.from === step.from && r.to === step.to) || (r.from === step.to && r.to === step.from),
-  );
+  const between = (a: Id, b: Id) => Object.values(model.relations).find((r) => (r.from === a && r.to === b) || (r.from === b && r.to === a));
+  const direct = between(step.from, step.to);
+  if (direct) return direct;
+  // Entre instancias (despliegue), la relación es la de lo que despliegan.
+  const deployed = (id: Id) => {
+    const el = model.elements[id];
+    return el?.kind === 'instance' ? el.instance.of : id;
+  };
+  const from = deployed(step.from);
+  const to = deployed(step.to);
+  return from !== step.from || to !== step.to ? between(from, to) : undefined;
 }
 
 /** Título por defecto de un paso sin título (lo que se ve en la lista y al reproducir). */

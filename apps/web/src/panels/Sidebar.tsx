@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ContextMenu } from 'radix-ui';
-import { ArrowDownLeft, ArrowUpRight, ChevronRight, Eye, Layers, Pencil, Plus, Search, Star, Trash2 } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, ChevronRight, Eye, Layers, Pencil, Plus, Search, Star, Trash2, Server } from 'lucide-react';
 import {
   KIND_LABEL,
   childLevelOf,
@@ -13,12 +13,15 @@ import {
   type Id,
   type Level,
   type Model,
+  LEVELS,
 } from '@aegon/core';
 import { Glyph, TechIcon } from '@aegon/icons';
 import { useUi, type SidebarTab } from '../store/ui.ts';
 import { FlowsPanel } from './FlowsPanel.tsx';
 import { useWorkspace } from '../store/workspace.ts';
 import { createView, deleteElement, deleteView, drillInto, renameView, revealElement, setDefaultView } from '../lib/actions.ts';
+import { openNewDeploymentView } from '../lib/flows.tsx';
+import { viewBadge } from '../lib/view-badge.ts';
 import { elementIcon } from '../canvas/nodes/ElementNode.tsx';
 import { DRAG_MIME } from '../canvas/api.ts';
 import { cn, IconButton, SectionTitle } from '../ui/primitives.tsx';
@@ -26,11 +29,11 @@ import { cn, IconButton, SectionTitle } from '../ui/primitives.tsx';
 type Row =
   | { type: 'section'; key: string; label: string; count: number }
   | { type: 'element'; key: string; el: Element; depth: number; hasChildren: boolean; expanded: boolean; inView: boolean }
-  | { type: 'view'; key: string; id: Id; name: string; level: Level; count: number; active: boolean; isDefault: boolean }
+  | { type: 'view'; key: string; id: Id; name: string; level: Level; badge: string; count: number; active: boolean; isDefault: boolean }
   | { type: 'empty'; key: string; label: string };
 
 function levelOf(el: Element): Level | null {
-  if (el.kind === 'group' || el.kind === 'actor') return null;
+  if (el.kind === 'group' || el.kind === 'actor' || el.kind === 'node' || el.kind === 'infra' || el.kind === 'instance') return null;
   if (el.kind === 'component') return 3;
   if (el.kind === 'container') return 2;
   if (el.kind === 'store' || el.kind === 'bus') return el.parent ? 2 : 1;
@@ -74,6 +77,7 @@ function buildModelRows(model: Model, expanded: ReadonlySet<Id>, query: string, 
     ['stores', 'Bases de datos', roots.filter((e) => e.kind === 'store')],
     ['buses', 'Buses de mensajería', roots.filter((e) => e.kind === 'bus')],
     ['loose', 'Sin sistema', roots.filter((e) => e.kind === 'container' || e.kind === 'component')],
+    ['deployment', 'Despliegue', roots.filter((e) => e.kind === 'node' || e.kind === 'infra' || e.kind === 'instance')],
   ];
   for (const [key, label, list] of sections) {
     const shown = list.filter((e) => visible(e.id)).sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
@@ -117,15 +121,15 @@ function buildGroupRows(model: Model, expanded: ReadonlySet<Id>, query: string, 
 function buildViewRows(model: Model, activeId: Id | null, query: string): Row[] {
   const q = normalize(query.trim());
   const rows: Row[] = [];
-  const titles: Record<Level, string> = { 1: 'Nivel 1 · Contexto', 2: 'Nivel 2 · Contenedores', 3: 'Nivel 3 · Componentes' };
-  for (const level of [1, 2, 3] as Level[]) {
+  const titles: Record<Level, string> = { 1: 'Nivel 1 · Contexto', 2: 'Nivel 2 · Contenedores', 3: 'Nivel 3 · Componentes', deployment: 'Despliegue' };
+  for (const level of LEVELS) {
     const list = sortedValues(model.views)
       .filter((v) => v.level === level && (!q || normalize(v.name).includes(q)))
       .sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
     if (!list.length) continue;
     rows.push({ type: 'section', key: `section:l${level}`, label: titles[level], count: list.length });
     for (const v of list) {
-      rows.push({ type: 'view', key: v.id, id: v.id, name: v.name, level, count: Object.keys(v.nodes).length, active: v.id === activeId, isDefault: model.workspace.defaultView === v.id });
+      rows.push({ type: 'view', key: v.id, id: v.id, name: v.name, level, badge: viewBadge(v), count: Object.keys(v.nodes).length, active: v.id === activeId, isDefault: model.workspace.defaultView === v.id });
     }
   }
   return rows;
@@ -198,9 +202,14 @@ export function Sidebar() {
           </button>
         ))}
         {tab === 'views' ? (
-          <IconButton size="sm" className="mt-1 ml-auto" label="Nuevo lienzo L1" onClick={() => createView()}>
-            <Plus size={14} />
-          </IconButton>
+          <>
+            <IconButton size="sm" className="mt-1 ml-auto" label="Nuevo lienzo de contexto (L1)" onClick={() => createView()}>
+              <Plus size={14} />
+            </IconButton>
+            <IconButton size="sm" className="mt-1" label="Nuevo lienzo de despliegue" onClick={() => void openNewDeploymentView()} data-testid="new-deployment-view">
+              <Server size={14} />
+            </IconButton>
+          </>
         ) : null}
       </div>
 
@@ -218,7 +227,7 @@ export function Sidebar() {
         </div>
         {tab === 'model' ? (
           <div className="flex gap-1">
-            {([1, 2, 3] as Level[]).map((l) => (
+            {([1, 2, 3] as const).map((l) => (
               <button
                 key={l}
                 type="button"
@@ -366,8 +375,8 @@ function ViewRow({ row, editing, setEditing }: { row: Extract<Row, { type: 'view
           )}
           data-testid={`view-row-${row.id}`}
         >
-          <span className={cn('grid h-[18px] w-[22px] shrink-0 place-items-center rounded-xs text-[10px] font-bold', row.active ? 'bg-accent text-accent-fg' : 'bg-raised text-fg-subtle')}>
-            L{row.level}
+          <span className={cn('grid h-[18px] min-w-[22px] shrink-0 place-items-center rounded-xs px-1 text-[10px] font-bold', row.active ? 'bg-accent text-accent-fg' : 'bg-raised text-fg-subtle')}>
+            {row.badge}
           </span>
           {editing ? (
             <input

@@ -21,6 +21,8 @@ import {
   Trash2,
   Undo2,
   Wallet,
+  FileText,
+  ImageDown,
 } from 'lucide-react';
 import { parentViewOf, type Model, type View } from '@aegon/core';
 import { Glyph, TechIcon } from '@aegon/icons';
@@ -40,7 +42,10 @@ import {
   openFinOpsSettings,
   openTemplates,
   saveWorkspaceAsTemplate,
+  openDocumentSettings,
+  openExportDialog,
 } from '../lib/flows.tsx';
+import { viewBadge } from '../lib/view-badge.ts';
 import { Button, IconButton, Kbd, cn } from '../ui/primitives.tsx';
 import { useChangeCount, useUnsaved } from './ChangesPanel.tsx';
 
@@ -194,6 +199,13 @@ function WorkspaceSwitcher() {
           >
             <Wallet size={14} /> Ambientes y costos…
           </DropdownMenu.Item>
+          <DropdownMenu.Item
+            className="menu-item"
+            onSelect={() => void openDocumentSettings()}
+            data-testid="menu-document"
+          >
+            <FileText size={14} /> Datos del documento…
+          </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -242,7 +254,7 @@ function Breadcrumbs() {
                 last ? 'text-fg' : 'text-fg-muted hover:bg-hover hover:text-fg',
               )}
             >
-              {scope ? (
+              {scope && v.level !== 'deployment' ? (
                 <Glyph
                   name={scope.kind}
                   size={13}
@@ -250,14 +262,14 @@ function Breadcrumbs() {
                   style={{ color: `var(--kind-${scope.kind})` }}
                 />
               ) : null}
-              <span className="truncate font-medium">{scope?.name ?? v.name}</span>
+              <span className="truncate font-medium">{v.level === 'deployment' ? v.name : (scope?.name ?? v.name)}</span>
               <span
                 className={cn(
                   'rounded-[4px] px-1 font-mono text-[10px] font-bold',
                   last ? 'bg-accent-soft text-accent' : 'bg-raised text-fg-subtle',
                 )}
               >
-                L{v.level}
+                {viewBadge(v)}
               </span>
             </button>
           </Fragment>
@@ -315,6 +327,7 @@ export function TopBar() {
   const changes = useChangeCount();
   const unsaved = useUnsaved();
   const git = useWorkspace((s) => s.git);
+  const hasView = useUi((s) => !!s.activeViewId);
 
   return (
     <header
@@ -397,6 +410,16 @@ export function TopBar() {
             {changes}
           </span>
         </button>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!hasView}
+          onClick={() => void openExportDialog()}
+          title="Exportar el lienzo a PNG o PDF (Ctrl ⇧ E)"
+          data-testid="topbar-export"
+        >
+          <ImageDown size={13} /> Exportar
+        </Button>
         {git ? (
           <Button
             variant="primary"

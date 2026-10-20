@@ -6,6 +6,7 @@ const WHAT: Record<Level, string> = {
   1: 'un sistema, un actor o un grupo cloud',
   2: 'un contenedor o una base de datos',
   3: 'un componente',
+  deployment: 'un nodo (datacenter, VPC, clúster), infraestructura o la instancia de un contenedor',
 };
 
 export function EmptyHint({ level }: { level: Level }) {

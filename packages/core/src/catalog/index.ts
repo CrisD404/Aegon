@@ -4,6 +4,8 @@ import type {
   Element,
   ElementKind,
   GroupProvider,
+  InfraType,
+  NodeType,
   Risk,
   Status,
   StoreType,
@@ -100,7 +102,7 @@ export const OTHER_BROKER = 'other';
 // -----------------------------------------------------------------------------------------------
 // Tecnologías de sistemas, contenedores y componentes
 
-export type TechCategory = 'language' | 'backend' | 'frontend' | 'mobile' | 'platform' | 'saas';
+export type TechCategory = 'language' | 'backend' | 'frontend' | 'mobile' | 'platform' | 'infrastructure' | 'saas';
 
 export interface Technology extends CatalogItem {
   category: TechCategory;
@@ -112,6 +114,7 @@ export const TECH_CATEGORY_LABEL: Readonly<Record<TechCategory, string>> = {
   frontend: 'Frontend',
   mobile: 'Mobile',
   platform: 'Plataforma',
+  infrastructure: 'Infraestructura y redes',
   saas: 'Productos',
 };
 
@@ -160,6 +163,34 @@ export const TECHNOLOGIES: readonly Technology[] = [
   { id: 'cloud-run', name: 'Cloud Run', icon: 'googlecloud', category: 'platform' },
   { id: 'cloud-functions', name: 'Cloud Functions', icon: 'googlecloud', category: 'platform' },
   { id: 'azure-functions', name: 'Azure Functions', icon: 'azurefunctions', category: 'platform' },
+  { id: 'openshift', name: 'OpenShift', icon: 'redhatopenshift', category: 'platform', keywords: ['ocp', 'red hat', 'k8s'] },
+  { id: 'rosa', name: 'Red Hat OpenShift on AWS', icon: 'redhatopenshift', category: 'platform', keywords: ['rosa', 'ocp', 'aws'] },
+  { id: 'vmware', name: 'VMware vSphere', icon: 'vmware', category: 'platform', keywords: ['esxi', 'vm'] },
+  { id: 'linux', name: 'Linux', icon: 'linux', category: 'platform', keywords: ['rhel', 'ubuntu'] },
+  { id: 'windows-server', name: 'Windows Server', icon: 'glyph:server', category: 'platform', keywords: ['windows', 'iis'] },
+  { id: 'aws-ec2', name: 'Amazon EC2', icon: 'glyph:server', category: 'infrastructure', keywords: ['aws', 'instancia', 'vm'] },
+  { id: 'aws-vpc', name: 'Amazon VPC', icon: 'glyph:network', category: 'infrastructure', keywords: ['aws', 'red'] },
+  { id: 'aws-alb', name: 'AWS Application Load Balancer', icon: 'glyph:network', category: 'infrastructure', keywords: ['alb', 'elb', 'load balancer', 'balanceador'] },
+  { id: 'aws-nlb', name: 'AWS Network Load Balancer', icon: 'glyph:network', category: 'infrastructure', keywords: ['nlb', 'elb', 'load balancer', 'balanceador'] },
+  { id: 'route53', name: 'Amazon Route 53', icon: 'glyph:network', category: 'infrastructure', keywords: ['route 53', 'dns', 'aws'] },
+  { id: 'aws-direct-connect', name: 'AWS Direct Connect', icon: 'glyph:network', category: 'infrastructure', keywords: ['direct connect', 'dx', 'enlace', 'aws'] },
+  { id: 'aws-security-group', name: 'AWS Security Group', icon: 'glyph:network', category: 'infrastructure', keywords: ['security group', 'sg', 'aws'] },
+  { id: 'aws-nat-gateway', name: 'AWS NAT Gateway', icon: 'glyph:network', category: 'infrastructure', keywords: ['nat', 'egress', 'aws'] },
+  { id: 'aws-api-gateway', name: 'Amazon API Gateway', icon: 'glyph:network', category: 'infrastructure', keywords: ['api gateway', 'aws'] },
+  { id: 'cloudfront', name: 'Amazon CloudFront', icon: 'glyph:globe', category: 'infrastructure', keywords: ['cdn', 'aws'] },
+  { id: 'aws-waf', name: 'AWS WAF', icon: 'glyph:network', category: 'infrastructure', keywords: ['waf', 'aws'] },
+  { id: 'azure-front-door', name: 'Azure Front Door', icon: 'glyph:globe', category: 'infrastructure', keywords: ['cdn', 'waf', 'azure'] },
+  { id: 'azure-apim', name: 'Azure API Management', icon: 'glyph:network', category: 'infrastructure', keywords: ['apim', 'api manager', 'azure'] },
+  { id: 'fortigate', name: 'FortiGate', icon: 'fortinet', category: 'infrastructure', keywords: ['fortinet', 'firewall', 'fg'] },
+  { id: 'palo-alto', name: 'Palo Alto NGFW', icon: 'paloaltonetworks', category: 'infrastructure', keywords: ['firewall'] },
+  { id: 'cisco', name: 'Cisco', icon: 'cisco', category: 'infrastructure', keywords: ['router', 'switch', 'asa'] },
+  { id: 'f5', name: 'F5 BIG-IP', icon: 'f5', category: 'infrastructure', keywords: ['load balancer', 'balanceador', 'waf'] },
+  { id: 'haproxy', name: 'HAProxy', icon: 'glyph:network', category: 'infrastructure', keywords: ['load balancer', 'balanceador'] },
+  { id: 'traefik', name: 'Traefik', icon: 'traefikproxy', category: 'infrastructure', keywords: ['ingress', 'proxy'] },
+  { id: 'envoy', name: 'Envoy', icon: 'envoyproxy', category: 'infrastructure', keywords: ['proxy', 'mesh'] },
+  { id: 'cloudflare', name: 'Cloudflare', icon: 'cloudflare', category: 'infrastructure', keywords: ['cdn', 'dns', 'waf'] },
+  { id: 'apim', name: 'API Manager', icon: 'glyph:network', category: 'infrastructure', keywords: ['apim', 'gateway', 'api gateway'] },
+  { id: 'entra-id', name: 'Microsoft Entra ID', icon: 'glyph:plug', category: 'saas', keywords: ['azure ad', 'aad', 'sso', 'microsoft'] },
   { id: 'keycloak', name: 'Keycloak', icon: 'keycloak', category: 'saas', keywords: ['iam', 'sso'] },
   { id: 'auth0', name: 'Auth0', icon: 'auth0', category: 'saas' },
   { id: 'okta', name: 'Okta', icon: 'okta', category: 'saas' },
@@ -168,7 +199,7 @@ export const TECHNOLOGIES: readonly Technology[] = [
 ];
 
 /** Tipos de elemento que llevan el campo `technology`. */
-export const KINDS_WITH_TECHNOLOGY: readonly ElementKind[] = ['system', 'container', 'component'];
+export const KINDS_WITH_TECHNOLOGY: readonly ElementKind[] = ['system', 'container', 'component', 'node', 'infra'];
 
 // -----------------------------------------------------------------------------------------------
 // Protocolos de relaciones
@@ -251,6 +282,8 @@ export const PROTOCOLS: readonly Protocol[] = [
   { id: 'ssh', name: 'SSH', icon: 'glyph:server', group: 'network' },
   { id: 'dns', name: 'DNS', icon: 'glyph:network', group: 'network' },
   { id: 'vpn', name: 'VPN/IPsec', icon: 'glyph:network', group: 'network' },
+  { id: 'bgp', name: 'BGP', icon: 'glyph:network', group: 'network', keywords: ['ebgp', 'ibgp', 'ruteo'] },
+  { id: 'tds', name: 'TDS (SQL Server)', icon: 'glyph:database', group: 'data', fits: { engines: ['sqlserver'] }, keywords: ['sql server', 'mssql', '1433'] },
 ];
 
 /** Qué grupos de protocolos son naturales según el tipo de destino (de más a menos). */
@@ -262,6 +295,9 @@ const GROUP_AFFINITY: Readonly<Record<ElementKind, readonly ProtocolGroup[]>> = 
   component: ['web', 'messaging', 'data', 'identity', 'files', 'email', 'network'],
   actor: ['web', 'email', 'identity', 'messaging', 'files', 'data', 'network'],
   group: ['network', 'web', 'messaging', 'data', 'files', 'identity', 'email'],
+  node: ['network', 'web', 'data', 'messaging', 'identity', 'files', 'email'],
+  infra: ['network', 'web', 'identity', 'data', 'messaging', 'files', 'email'],
+  instance: ['web', 'messaging', 'data', 'identity', 'files', 'network', 'email'],
 };
 
 /**
@@ -311,6 +347,49 @@ export const GROUP_PROVIDER_CATALOG: readonly ProviderItem[] = [
   { id: 'platform', name: 'Plataforma', icon: 'glyph:layers', keywords: ['k8s', 'cluster'] },
   { id: 'other', name: 'Otro', icon: 'glyph:group' },
 ];
+
+/** Proveedores de los nodos de despliegue (los de grupos más plataformas). */
+export const NODE_PROVIDER_CATALOG: readonly CatalogItem[] = [
+  ...GROUP_PROVIDER_CATALOG.filter((p) => p.id !== 'network' && p.id !== 'platform' && p.id !== 'other'),
+  { id: 'openshift', name: 'OpenShift', icon: 'redhatopenshift', keywords: ['ocp', 'rosa'] },
+  { id: 'kubernetes', name: 'Kubernetes', icon: 'kubernetes', keywords: ['k8s', 'eks', 'aks', 'gke'] },
+  { id: 'vmware', name: 'VMware', icon: 'vmware' },
+  { id: 'other', name: 'Otro', icon: 'glyph:server' },
+];
+
+export const NODE_TYPE_LABEL: Readonly<Record<NodeType, string>> = {
+  datacenter: 'Datacenter',
+  cloud: 'Nube / cuenta',
+  region: 'Región',
+  zone: 'Zona de disponibilidad',
+  network: 'Red / VPC',
+  subnet: 'Subred',
+  cluster: 'Clúster',
+  namespace: 'Namespace / proyecto',
+  server: 'Servidor',
+  vm: 'Máquina virtual',
+  runtime: 'Runtime / servidor de aplicaciones',
+  device: 'Dispositivo',
+  other: 'Nodo',
+};
+
+export const INFRA_TYPE_LABEL: Readonly<Record<InfraType, string>> = {
+  firewall: 'Firewall',
+  'load-balancer': 'Balanceador de carga',
+  dns: 'DNS',
+  gateway: 'API gateway',
+  ingress: 'Ingress',
+  egress: 'Egress',
+  nat: 'NAT',
+  vpn: 'VPN',
+  link: 'Enlace dedicado',
+  'security-group': 'Security group',
+  waf: 'WAF',
+  cdn: 'CDN',
+  proxy: 'Proxy',
+  router: 'Router',
+  other: 'Infraestructura',
+};
 
 export const CONTAINER_TYPE_LABEL: Readonly<Record<ContainerType, string>> = {
   web: 'Aplicación web',
@@ -378,6 +457,13 @@ export function findProtocol(id: string): Protocol | undefined {
   return protocolById.get(id.toLowerCase());
 }
 
+/** Protocolos y puertos de una relación: "HTTPS :443, :80", "TCP :443", ":1433". */
+export function relationTechnology(rel: { protocols?: readonly string[]; ports?: readonly number[] }): string {
+  const protocols = (rel.protocols ?? []).map((p) => findProtocol(p)?.name ?? p).join(', ');
+  const ports = (rel.ports ?? []).map((p) => `:${p}`).join(', ');
+  return [protocols, ports].filter(Boolean).join(' ');
+}
+
 export function findProvider(id: string): ProviderItem | undefined {
   return GROUP_PROVIDER_CATALOG.find((p) => p.id === id);
 }
@@ -398,4 +484,51 @@ export function searchCatalog<T extends CatalogItem>(items: readonly T[], query:
     if (score >= 0) scored.push({ item, score });
   }
   return scored.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name)).slice(0, limit).map((s) => s.item);
+}
+
+/** Palabras con las que se busca cada tipo de nodo de despliegue ("vpc" → red, "ocp" → clúster). */
+export const NODE_TYPE_KEYWORDS: Readonly<Record<NodeType, readonly string[]>> = {
+  datacenter: ['datacenter', 'dc', 'centro de datos', 'on premise', 'onprem', 'cpd'],
+  cloud: ['nube', 'cloud', 'cuenta', 'suscripcion', 'aws', 'azure', 'gcp'],
+  region: ['region'],
+  zone: ['zona', 'az', 'availability zone'],
+  network: ['red', 'vpc', 'vnet', 'network'],
+  subnet: ['subred', 'subnet'],
+  cluster: ['cluster', 'openshift', 'ocp', 'rosa', 'kubernetes', 'k8s', 'eks', 'aks', 'gke'],
+  namespace: ['namespace', 'proyecto', 'project', 'ns'],
+  server: ['servidor', 'server', 'host', 'bare metal'],
+  vm: ['vm', 'maquina virtual', 'ec2', 'instancia ec2'],
+  runtime: ['runtime', 'jvm', 'tomcat', 'iis', 'servidor de aplicaciones', 'app server'],
+  device: ['dispositivo', 'device', 'totem', 'kiosco', 'movil'],
+  other: [],
+};
+
+export const INFRA_TYPE_KEYWORDS: Readonly<Record<InfraType, readonly string[]>> = {
+  firewall: ['firewall', 'fw', 'fortigate', 'palo alto'],
+  'load-balancer': ['balanceador', 'load balancer', 'lb', 'alb', 'nlb', 'elb', 'f5'],
+  dns: ['dns', 'route 53', 'route53'],
+  gateway: ['gateway', 'api gateway', 'apim', 'api manager'],
+  ingress: ['ingress', 'entrada'],
+  egress: ['egress', 'salida'],
+  nat: ['nat'],
+  vpn: ['vpn', 'ipsec'],
+  link: ['enlace', 'direct connect', 'expressroute', 'interconnect', 'mpls'],
+  'security-group': ['security group', 'sg', 'grupo de seguridad', 'nsg'],
+  waf: ['waf'],
+  cdn: ['cdn', 'cloudfront', 'akamai'],
+  proxy: ['proxy', 'reverse proxy'],
+  router: ['router'],
+  other: [],
+};
+
+const plain = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+/** Tipos de nodo e infraestructura que coinciden con un texto (para crear desde el lienzo). */
+export function suggestDeploymentTypes(query: string, limit = 3): { nodes: NodeType[]; infra: InfraType[] } {
+  const q = plain(query);
+  if (q.length < 2) return { nodes: [], infra: [] };
+  const hit = (label: string, words: readonly string[]) => [label, ...words].some((w) => plain(w).startsWith(q) || q.startsWith(plain(w)) || plain(w).split(' ').some((p) => p.startsWith(q)));
+  const nodes = (Object.keys(NODE_TYPE_KEYWORDS) as NodeType[]).filter((t) => t !== 'other' && hit(NODE_TYPE_LABEL[t], NODE_TYPE_KEYWORDS[t]));
+  const infra = (Object.keys(INFRA_TYPE_KEYWORDS) as InfraType[]).filter((t) => t !== 'other' && hit(INFRA_TYPE_LABEL[t], INFRA_TYPE_KEYWORDS[t]));
+  return { nodes: nodes.slice(0, limit), infra: infra.slice(0, limit) };
 }

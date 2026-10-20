@@ -56,6 +56,33 @@ test('un elemento existente se linkea en otro lienzo, no se duplica', async ({ p
   await expect(page.getByText('Aparece en 2 lienzos')).toBeVisible();
 });
 
+test('si lo escrito coincide con algo del modelo, Enter lo reutiliza en vez de duplicarlo', async ({ page }) => {
+  await page.getByTestId('node-home-banking').dblclick();
+  await expect(page.getByTestId('node-web-app')).toBeVisible();
+  const p = await emptyPoint(page);
+  await page.mouse.dblclick(p.x, p.y);
+  await page.getByTestId('ghost-input').fill('oper');
+  // El existente va primero (antes que "Crear «oper» como…").
+  const first = page.locator('[cmdk-item]').first();
+  await expect(first).toHaveAttribute('data-testid', 'ghost-existing-operador');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('node-operador')).toBeVisible();
+  await expect(page.getByText('Aparece en 2 lienzos')).toBeVisible();
+  expect(await changesCount(page)).toBe(1); // solo la ubicación: no se creó un elemento nuevo
+});
+
+test('Agregar abre el fantasma con los tipos explicados y lo que ya está en el modelo', async ({ page }) => {
+  await page.getByTestId('dock-add').click();
+  await expect(page.getByTestId('ghost-input')).toBeFocused();
+  const system = page.getByTestId('ghost-create-system');
+  await expect(system).toContainText('Sistema');
+  await expect(system).toContainText('Un software completo');
+  await expect(system).toContainText('Ej.:');
+  await expect(page.getByTestId('ghost-existing')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('ghost-input')).toBeHidden();
+});
+
 test('cambios en borrador: persisten al recargar, se revierten y se guardan', async ({ page }) => {
   await page.getByTestId('node-notificaciones').click();
   const name = page.getByTestId('inspector-name');
@@ -85,6 +112,40 @@ test('cambios en borrador: persisten al recargar, se revierten y se guardan', as
   await page.reload();
   await expect(page.getByTestId('node-notificaciones')).toContainText('Mensajería');
   expect(await changesCount(page)).toBe(0);
+});
+
+test('con Espacio, arrastrar sobre un nodo mueve la vista y no el nodo', async ({ page }) => {
+  const node = page.locator('.react-flow__node[data-id="home-banking"]');
+  const viewport = page.locator('.react-flow__viewport');
+  const before = { node: await node.getAttribute('style'), view: await viewport.getAttribute('style') };
+  const box = (await node.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.down('Space');
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 140, box.y + box.height / 2 + 60, { steps: 8 });
+  await page.mouse.up();
+  await page.keyboard.up('Space');
+  expect(await node.getAttribute('style')).toBe(before.node);
+  expect(await viewport.getAttribute('style')).not.toBe(before.view);
+  expect(await changesCount(page)).toBe(0);
+});
+
+test('el fantasma muestra la opción resaltada: tipo con ejemplos, motor o nombre escrito', async ({ page }) => {
+  const p = await emptyPoint(page);
+  await page.mouse.dblclick(p.x, p.y);
+  const preview = page.getByTestId('ghost-preview');
+  await expect(preview).toHaveAttribute('data-preview', 'create:system');
+  await expect(preview).toContainText('Nuevo · Sistema');
+  await page.getByTestId('ghost-create-store').hover();
+  await expect(preview).toHaveAttribute('data-preview', 'create:store');
+  await expect(preview).toContainText('Base de datos');
+  await page.getByTestId('ghost-input').fill('Pagos Online');
+  await expect(preview).toContainText('Pagos Online');
+  await page.getByTestId('ghost-input').fill('mongo');
+  await expect(preview).toHaveAttribute('data-preview', 'engine:mongodb');
+  await expect(preview).toContainText('MongoDB');
+  await page.keyboard.press('Escape');
+  await expect(preview).toBeHidden();
 });
 
 test('Shift al arrastrar muestra guías de alineación', async ({ page }) => {

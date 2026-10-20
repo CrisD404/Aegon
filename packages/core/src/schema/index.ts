@@ -19,7 +19,9 @@ export const Id = z
   .regex(/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/, 'ID inválido: usá letras, números, ".", "_" o "-"');
 export type Id = z.infer<typeof Id>;
 
-export const ELEMENT_KINDS = ['actor', 'system', 'container', 'component', 'store', 'bus', 'group'] as const;
+export const ELEMENT_KINDS = ['actor', 'system', 'container', 'component', 'store', 'bus', 'group', 'node', 'infra', 'instance'] as const;
+/** Tipos que solo existen en los lienzos de despliegue (dónde y cómo corre el software en cada ambiente). */
+export const DEPLOYMENT_KINDS = ['node', 'infra', 'instance'] as const;
 export const ElementKind = z.enum(ELEMENT_KINDS);
 export type ElementKind = z.infer<typeof ElementKind>;
 
@@ -226,6 +228,111 @@ export const Group = z.object({
 });
 export type Group = z.infer<typeof Group>;
 
+// -----------------------------------------------------------------------------------------------
+// Despliegue (C4 deployment): nodos, infraestructura e instancias. Cada uno vale para los
+// ambientes de `environments` (sin el campo, para todos).
+
+/** Direcciones de red: IPs, CIDRs, hostnames o URLs (con puerto si hace falta). */
+const Addresses = z.array(z.string().min(1));
+
+export const NODE_TYPES = [
+  'datacenter',
+  'cloud',
+  'region',
+  'zone',
+  'network',
+  'subnet',
+  'cluster',
+  'namespace',
+  'server',
+  'vm',
+  'runtime',
+  'device',
+  'other',
+] as const;
+export const NodeType = z.enum(NODE_TYPES);
+export type NodeType = z.infer<typeof NodeType>;
+
+export const NodeDetails = z.object({
+  type: NodeType,
+  /** Proveedor del catálogo (`aws`, `azure`, `gcp`, `onprem`, `openshift`…). */
+  provider: z.string().optional(),
+  region: z.string().optional(),
+  /** Cuenta, suscripción o proyecto. */
+  account: z.string().optional(),
+  /** Tamaño o tipo de instancia (`m5.2xlarge`, `Standard_D4s_v5`). */
+  size: z.string().optional(),
+  /** Cantidad de nodos iguales (C4: "x N"). */
+  instances: z.number().int().positive().optional(),
+});
+export type NodeDetails = z.infer<typeof NodeDetails>;
+
+/**
+ * Nodo de despliegue: algo que ejecuta o aloja software (datacenter, nube, VPC, clúster,
+ * namespace, servidor, VM…). Se anidan con `parent`.
+ */
+export const DeploymentNode = z.object({
+  ...baseElement,
+  kind: z.literal('node'),
+  node: NodeDetails,
+  technology: z.array(z.string()).optional(),
+  addresses: Addresses.optional(),
+  /** ID del recurso en el proveedor (`vpc-0a1b…`, `i-0123…`, ARN). */
+  resource: z.string().optional(),
+  risk: Risk.optional(),
+});
+export type DeploymentNode = z.infer<typeof DeploymentNode>;
+
+export const INFRA_TYPES = [
+  'firewall',
+  'load-balancer',
+  'dns',
+  'gateway',
+  'ingress',
+  'egress',
+  'nat',
+  'vpn',
+  'link',
+  'security-group',
+  'waf',
+  'cdn',
+  'proxy',
+  'router',
+  'other',
+] as const;
+export const InfraType = z.enum(INFRA_TYPES);
+export type InfraType = z.infer<typeof InfraType>;
+
+/** Nodo de infraestructura: no ejecuta el software pero el tráfico pasa por él (firewall, DNS, balanceador…). */
+export const InfraNode = z.object({
+  ...baseElement,
+  kind: z.literal('infra'),
+  infra: z.object({ type: InfraType }),
+  technology: z.array(z.string()).optional(),
+  addresses: Addresses.optional(),
+  resource: z.string().optional(),
+  risk: Risk.optional(),
+});
+export type InfraNode = z.infer<typeof InfraNode>;
+
+/** Tipos que se pueden instanciar en un nodo de despliegue. */
+export const INSTANCE_OF_KINDS = ['container', 'store', 'bus', 'system'] as const;
+
+/** Instancia de un contenedor (o base, bus o sistema) desplegada en un nodo. */
+export const Instance = z.object({
+  ...baseElement,
+  kind: z.literal('instance'),
+  instance: z.object({
+    /** Elemento desplegado (container, store, bus o system). */
+    of: Id,
+    /** Réplicas (pods, procesos). */
+    replicas: z.number().int().positive().optional(),
+  }),
+  addresses: Addresses.optional(),
+  resource: z.string().optional(),
+});
+export type Instance = z.infer<typeof Instance>;
+
 export const Element = z.discriminatedUnion('kind', [
   Actor,
   System,
@@ -234,6 +341,9 @@ export const Element = z.discriminatedUnion('kind', [
   Store,
   Bus,
   Group,
+  DeploymentNode,
+  InfraNode,
+  Instance,
 ]);
 export type Element = z.infer<typeof Element>;
 export type ElementOf<K extends ElementKind> = Extract<Element, { kind: K }>;
@@ -249,6 +359,8 @@ export const Relation = z.object({
   description: z.string().optional(),
   /** Protocolos de la comunicación (catálogo `PROTOCOLS`: `https`, `grpc`, `jdbc`, `kafka`…). */
   protocols: z.array(z.string()).optional(),
+  /** Puertos de destino (`443`, `8080`). */
+  ports: z.array(z.number().int().min(1).max(65535)).optional(),
   /** Por defecto `outgoing`. */
   direction: Direction.optional(),
   status: Status.optional(),
@@ -258,9 +370,11 @@ export const Relation = z.object({
 });
 export type Relation = z.infer<typeof Relation>;
 
-export const LEVELS = [1, 2, 3] as const;
-export const Level = z.union([z.literal(1), z.literal(2), z.literal(3)]);
+/** Niveles C4 (contexto, contenedores, componentes) y el diagrama de despliegue de un ambiente. */
+export const LEVELS = [1, 2, 3, 'deployment'] as const;
+export const Level = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal('deployment')]);
 export type Level = z.infer<typeof Level>;
+export type C4Level = Exclude<Level, 'deployment'>;
 
 export const NodeLayout = z.object({
   x: z.number(),
@@ -283,8 +397,13 @@ export const View = z.object({
   id: Id,
   name: z.string().min(1),
   level: Level,
-  /** Elemento que se "abre": system en L2, container en L3. Vacío en L1. */
+  /**
+   * Elemento que se "abre": system en L2, container en L3. Vacío en L1. En despliegue, opcional:
+   * el sistema cuyo despliegue se muestra.
+   */
   scope: Id.optional(),
+  /** Solo despliegue: ambiente que muestra (ID de un ambiente del workspace). */
+  environment: Id.optional(),
   description: z.string().optional(),
   /** Posición (absoluta) de cada elemento ubicado en el lienzo, indexada por ID de elemento. */
   nodes: z.record(Id, NodeLayout),
@@ -321,6 +440,12 @@ export const WorkspaceMeta = z.object({
   description: z.string().optional(),
   organization: z.string().optional(),
   architect: z.string().optional(),
+  /** Código del documento o del cambio que lo motiva (ej. `ARQ-1024`, un ticket). */
+  code: z.string().optional(),
+  /** Versión del documento de arquitectura (`v1.9`). */
+  version: z.string().optional(),
+  /** Fecha de esa versión (ISO `AAAA-MM-DD`). */
+  date: z.string().optional(),
   /** Lienzo que se abre por defecto. */
   defaultView: Id.optional(),
   environments: z.array(Environment).optional(),

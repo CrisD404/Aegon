@@ -10,7 +10,7 @@ function GroupNodeImpl({ data, selected }: NodeProps<GroupFlowNode>) {
   const provider = findProvider(el.group.provider);
   const detail = [el.group.region, el.group.account, el.group.cidr].filter(Boolean).join(' · ');
   return (
-    <div className="c4-group" data-provider={el.group.provider} data-testid={`group-${el.id}`}>
+    <div className="c4-group" data-provider={el.group.provider} data-frame-id={el.id} data-testid={`group-${el.id}`}>
       <NodeResizer isVisible={selected} minWidth={200} minHeight={120} />
       <div className="c4-group__edge" />
       <div className="c4-group__label">

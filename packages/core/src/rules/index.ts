@@ -1,10 +1,11 @@
 import { ancestorsOf, hasParentCycle, indexOf, sortedValues, type Model } from '../model/index.ts';
-import type { Element, FlowStep, Id, LeafStep, View } from '../schema/index.ts';
+import { INSTANCE_OF_KINDS, type Element, type FlowStep, type Id, type LeafStep, type View } from '../schema/index.ts';
 import {
   KINDS_FOR_LEVEL,
   PARENT_KINDS,
   SCOPE_KIND_FOR_LEVEL,
   canHaveParent,
+  levelLabel,
 } from './hierarchy.ts';
 
 export * from './hierarchy.ts';
@@ -31,6 +32,9 @@ export function placementProblem(model: Model, view: View, el: Element): string 
   }
   if (view.scope && ancestorsOf(model, view.scope).some((a) => a.id === el.id)) {
     return 'No se puede ubicar un ancestro del elemento abierto';
+  }
+  if (view.level === 'deployment' && view.environment && el.environments && !el.environments.includes(view.environment)) {
+    return `"${el.name}" no está desplegado en el ambiente de este lienzo`;
   }
   return null;
 }
@@ -62,6 +66,20 @@ export function validateModel(model: Model): Diagnostic[] {
     } else if (el.kind === 'container' || el.kind === 'component') {
       const expected = PARENT_KINDS[el.kind].join(' o ');
       out.push({ severity: 'warning', code: 'orphan-child', message: `El ${el.kind} "${el.name}" no pertenece a ningún ${expected}`, entity });
+    } else if (el.kind === 'instance') {
+      out.push({ severity: 'warning', code: 'orphan-instance', message: `La instancia "${el.name}" no está en ningún nodo de despliegue`, entity });
+    }
+    if (el.kind === 'instance') {
+      const target = model.elements[el.instance.of];
+      if (!target) out.push({ severity: 'error', code: 'missing-instance-target', message: `La instancia "${el.name}" despliega "${el.instance.of}", que no existe`, entity });
+      else if (!(INSTANCE_OF_KINDS as readonly string[]).includes(target.kind)) {
+        out.push({ severity: 'error', code: 'invalid-instance-target', message: `Una instancia despliega un contenedor, base, bus o sistema, no un ${target.kind} ("${el.name}")`, entity });
+      }
+    }
+    // Un elemento de despliegue no puede valer para ambientes en los que su nodo no está.
+    const host = el.parent ? model.elements[el.parent] : undefined;
+    if (host?.kind === 'node' && host.environments && (!el.environments || el.environments.some((e) => !host.environments!.includes(e)))) {
+      out.push({ severity: 'warning', code: 'environment-mismatch', message: `"${el.name}" está en ambientes donde su nodo "${host.name}" no existe`, entity });
     }
     for (const g of el.groups ?? []) {
       const group = model.elements[g];
@@ -91,6 +109,9 @@ export function validateModel(model: Model): Diagnostic[] {
     if (from && to && (from.kind === 'group' || to.kind === 'group')) {
       out.push({ severity: 'error', code: 'group-relation', message: `Los grupos no pueden tener relaciones ("${rel.id}")`, entity });
     }
+    if (from && to && from.environments && to.environments && !from.environments.some((e) => to.environments!.includes(e))) {
+      out.push({ severity: 'warning', code: 'cross-environment-relation', message: `"${from.name}" y "${to.name}" no comparten ningún ambiente ("${rel.id}")`, entity });
+    }
   }
 
   for (const view of sortedValues(model.views)) {
@@ -99,11 +120,22 @@ export function validateModel(model: Model): Diagnostic[] {
     if (scopeKind && !view.scope) {
       out.push({ severity: 'error', code: 'missing-scope', message: `El lienzo L${view.level} "${view.name}" necesita un ${scopeKind}`, entity });
     }
+    if (view.level === 'deployment') {
+      if (!view.environment) out.push({ severity: 'error', code: 'missing-environment', message: `El lienzo de despliegue "${view.name}" necesita un ambiente`, entity });
+      else if (!(model.workspace.environments ?? []).some((e) => e.id === view.environment)) {
+        out.push({ severity: 'warning', code: 'unknown-environment', message: `El lienzo "${view.name}" muestra el ambiente "${view.environment}", que no está definido en el workspace`, entity });
+      }
+      if (view.scope && model.elements[view.scope] && model.elements[view.scope]!.kind !== 'system') {
+        out.push({ severity: 'error', code: 'invalid-scope', message: `Un lienzo de despliegue muestra un sistema, no un ${model.elements[view.scope]!.kind}`, entity });
+      }
+    } else if (view.environment) {
+      out.push({ severity: 'warning', code: 'environment-on-c4-view', message: `Solo los lienzos de despliegue tienen ambiente ("${view.name}")`, entity });
+    }
     if (view.scope) {
       const scope = model.elements[view.scope];
       if (!scope) out.push({ severity: 'error', code: 'missing-scope', message: `El lienzo "${view.name}" abre "${view.scope}", que no existe`, entity });
       else if (scopeKind && scope.kind !== scopeKind) {
-        out.push({ severity: 'error', code: 'invalid-scope', message: `Un lienzo L${view.level} abre un ${scopeKind}, no un ${scope.kind}`, entity });
+        out.push({ severity: 'error', code: 'invalid-scope', message: `Un lienzo ${levelLabel(view.level)} abre un ${scopeKind}, no un ${scope.kind}`, entity });
       }
     }
     for (const nodeId of Object.keys(view.nodes)) {

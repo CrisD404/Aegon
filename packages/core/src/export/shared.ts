@@ -1,7 +1,8 @@
 import { ancestorsOf, sortedValues, type Model } from '../model/index.ts';
 import type { Element, Id, Relation, View } from '../schema/index.ts';
-import { findBroker, findEngine, findProtocol, findTechnology } from '../catalog/index.ts';
+import { findBroker, findEngine, findTechnology, relationTechnology } from '../catalog/index.ts';
 import { OpError } from '../ops/index.ts';
+import { levelRank } from '../rules/hierarchy.ts';
 import type { ViewEdge } from '../ops/commands.ts';
 
 /** Identificadores seguros para otros lenguajes (`[A-Za-z0-9_]`, sin empezar con número), únicos. */
@@ -41,8 +42,7 @@ export function techText(el: Element): string {
 }
 
 export function protocolsText(relations: readonly Relation[]): string {
-  const ids = [...new Set(relations.flatMap((r) => r.protocols ?? []))];
-  return ids.map((p) => findProtocol(p)?.name ?? p).join(', ');
+  return [...new Set(relations.map((r) => relationTechnology(r)).filter(Boolean))].join(', ');
 }
 
 /** Etiqueta de una relación del lienzo; las implícitas resumen las relaciones que agrupan. */
@@ -60,7 +60,7 @@ export function viewsToExport(model: Model, viewId?: Id): View[] {
     if (!view) throw new OpError('not-found', `No existe el lienzo "${viewId}"`);
     return [view];
   }
-  const views = sortedValues(model.views).sort((a, b) => a.level - b.level || a.id.localeCompare(b.id));
+  const views = sortedValues(model.views).sort((a, b) => levelRank(a.level) - levelRank(b.level) || a.id.localeCompare(b.id));
   const first = model.workspace.defaultView;
   return first ? [...views.filter((v) => v.id === first), ...views.filter((v) => v.id !== first)] : views;
 }
@@ -104,4 +104,37 @@ export function frameView(model: Model, view: View): Framed {
     if (members?.length) framed.groups.push({ element: el, members });
   }
   return framed;
+}
+
+/** Árbol de un lienzo de despliegue: cada elemento ubicado bajo su nodo ubicado más cercano. */
+export interface DeploymentTreeNode {
+  element: Element;
+  children: DeploymentTreeNode[];
+}
+
+export function deploymentTree(model: Model, view: View): DeploymentTreeNode[] {
+  const placed = Object.keys(view.nodes)
+    .map((id) => model.elements[id])
+    .filter((el): el is Element => !!el)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const nodes = new Map<Id, DeploymentTreeNode>(placed.map((el) => [el.id, { element: el, children: [] }]));
+  const roots: DeploymentTreeNode[] = [];
+  for (const el of placed) {
+    const host = ancestorsOf(model, el.id).find((a) => nodes.has(a.id) && a.kind === 'node');
+    (host ? nodes.get(host.id)!.children : roots).push(nodes.get(el.id)!);
+  }
+  return roots;
+}
+
+/** Texto de los detalles de despliegue (direcciones, recurso, tamaño). */
+export function deploymentDetails(el: Element): string {
+  const parts: string[] = [];
+  if (el.kind === 'node') {
+    if (el.node.size) parts.push(el.node.size);
+    if (el.node.instances && el.node.instances > 1) parts.push(`x${el.node.instances}`);
+  }
+  if (el.kind === 'instance' && el.instance.replicas && el.instance.replicas > 1) parts.push(`x${el.instance.replicas}`);
+  if ('addresses' in el && el.addresses?.length) parts.push(el.addresses.join(', '));
+  if ('resource' in el && el.resource) parts.push(el.resource);
+  return parts.join(' · ');
 }

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { deployedIn, type View } from '@aegon/core';
+import { deployedIn, visualParentOf, type View } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import type { RelationFlowEdge } from './derive.ts';
@@ -59,14 +59,21 @@ export function CanvasHighlight({
     }
     if (focusMode && selected.length) {
       const keep = focusSet(selected, edges);
-      const rules = [
-        `${scope} .react-flow__node-element:not(:is(${byId(keep.nodes)})) { opacity: 0.16; }`,
-      ];
+      // Un marco seleccionado (grupo, nodo de despliegue) no atenúa lo que contiene.
+      const inside = (id: string): boolean => {
+        const el = model.elements[id];
+        const parent = el ? visualParentOf(model, view, el) : undefined;
+        return !!parent && (keep.nodes.has(parent) || inside(parent));
+      };
+      for (const id of Object.keys(view.nodes)) if (!keep.nodes.has(id) && inside(id)) keep.nodes.add(id);
+      // Suave (es el modo por defecto) y nunca mientras se arrastra: reacomodar necesita ver todo.
+      const focus = `${scope}:not(:has(.react-flow__node.dragging))`;
+      const rules = [`${focus} .react-flow__node-element:not(:is(${byId(keep.nodes)})) { opacity: 0.38; }`];
       if (keep.edges.size) {
-        rules.push(`${scope} .react-flow__edge:not(:is(${byId(keep.edges)})) { opacity: 0.07; }`);
-        rules.push(`${scope} .c4-edge-label:not(:is(${labels(keep.edges)})) { opacity: 0.1; }`);
+        rules.push(`${focus} .react-flow__edge:not(:is(${byId(keep.edges)})) { opacity: 0.18; }`);
+        rules.push(`${focus} .c4-edge-label:not(:is(${labels(keep.edges)})) { opacity: 0.25; }`);
       } else {
-        rules.push(`${scope} .react-flow__edge, ${scope} .c4-edge-label { opacity: 0.07; }`);
+        rules.push(`${focus} .react-flow__edge, ${focus} .c4-edge-label { opacity: 0.18; }`);
       }
       return withEnv(rules.join('\n'));
     }

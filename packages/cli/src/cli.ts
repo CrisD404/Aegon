@@ -91,8 +91,8 @@ const COMMANDS: Record<string, Command> = {
     },
   },
   add: {
-    usage: 'add <kind> <nombre>',
-    summary: 'Agrega un elemento (actor, system, container, component, store, bus, group)',
+    usage: 'add <kind> [nombre]',
+    summary: 'Agrega un elemento (actor, system, container, component, store, bus, group, node, infra, instance)',
     help: `Opciones:
   --parent <id>            Padre en la jerarquía C4 (container → system, component → container)
   --view <id>              Lienzo donde ubicarlo (hereda el padre del lienzo si no se indica)
@@ -104,9 +104,21 @@ const COMMANDS: Record<string, Command> = {
   --engine <motor>         Motor de una base (postgresql, mongodb, redis…)
   --broker <broker>        Broker de un bus (kafka, rabbitmq, sqs…)
   --topics <a,b>           Tópicos o colas de un bus
-  --provider <p>           Proveedor de un grupo (aws, gcp, azure, onprem, network, platform)
-  --region <región>        Región de un grupo
+  --provider <p>           Proveedor de un grupo (aws, gcp, azure, onprem, network, platform) o de un nodo (aws, openshift…)
+  --region <región>        Región de un grupo o nodo
   --role <rol>             Rol de un actor
+
+Despliegue:
+  --node-type <tipo>       Nodo: datacenter, cloud, region, zone, network, subnet, cluster, namespace, server, vm…
+  --size <tamaño>          Nodo: tamaño o tipo de instancia (m5.2xlarge)
+  --instances <n>          Nodo: cantidad de nodos iguales
+  --account <cuenta>       Nodo: cuenta, suscripción o proyecto
+  --infra-type <tipo>      Infraestructura: firewall, load-balancer, dns, gateway, ingress, egress, nat, vpn, link…
+  --of <id>                Instancia: el container, store, bus o system que despliega (el nombre es opcional)
+  --replicas <n>           Instancia: réplicas
+  --addresses <a,b>        IPs, CIDRs, hosts o URLs
+  --resource <id>          ID del recurso en el proveedor (vpc-…, i-…, ARN)
+  --env <a,b>              Ambientes donde existe
   --external               Elemento externo (fuera de la organización)
   --status <estado>        planned, live, deprecated, retired
   --risk <riesgo>          low, medium, high, critical
@@ -127,6 +139,16 @@ const COMMANDS: Record<string, Command> = {
       provider: { type: 'string' },
       region: { type: 'string' },
       role: { type: 'string' },
+      'node-type': { type: 'string' },
+      size: { type: 'string' },
+      instances: { type: 'string' },
+      account: { type: 'string' },
+      'infra-type': { type: 'string' },
+      of: { type: 'string' },
+      replicas: { type: 'string' },
+      addresses: { type: 'string' },
+      resource: { type: 'string' },
+      env: { type: 'string' },
       external: { type: 'boolean' },
       status: { type: 'string' },
       risk: { type: 'string' },
@@ -135,7 +157,7 @@ const COMMANDS: Record<string, Command> = {
       owner: { type: 'string' },
     },
     run: async (io, pos, v) => {
-      need(pos, 2, 'add <kind> <nombre>');
+      if (!(pos.length === 2 || (pos.length === 1 && v.of))) throw new UsageError('Uso: aegon add <kind> <nombre> (en una instancia alcanza con --of)');
       const x = num(v.x, 'x');
       const y = num(v.y, 'y');
       if ((x === undefined) !== (y === undefined)) throw new UsageError('Indicá --x y --y juntos');
@@ -145,7 +167,7 @@ const COMMANDS: Record<string, Command> = {
         ws,
         {
           kind: pos[0]!,
-          name: pos[1]!,
+          name: pos[1] ?? '',
           id: str(v.id),
           parent: str(v.parent),
           view: str(v.view),
@@ -159,6 +181,16 @@ const COMMANDS: Record<string, Command> = {
           provider: str(v.provider),
           region: str(v.region),
           role: str(v.role),
+          nodeType: str(v['node-type']),
+          size: str(v.size),
+          instances: num(v.instances, 'instances'),
+          account: str(v.account),
+          infraType: str(v['infra-type']),
+          of: str(v.of),
+          replicas: num(v.replicas, 'replicas'),
+          addresses: list(v.addresses as string | undefined),
+          resource: str(v.resource),
+          environments: list(v.env as string | undefined),
           external: !!v.external,
           status: oneOf<Status>(v.status, STATUSES, 'status'),
           risk: oneOf<Risk>(v.risk, RISKS, 'risk'),
@@ -177,6 +209,7 @@ const COMMANDS: Record<string, Command> = {
   -l, --label <texto>      Qué hace la relación ("Lee y escribe", "Publica pagos")
   -d, --description <txt>  Descripción larga
   -p, --protocols <a,b>    Protocolos del catálogo (https, rest, grpc, kafka, jdbc…)
+  --ports <a,b>            Puertos de destino (443, 8080)
   --bidirectional          La comunicación va en ambos sentidos
   --status <estado>        planned, live, deprecated, retired
 
@@ -185,6 +218,7 @@ Si ya existe la relación al revés, se vuelve bidireccional; si ya existe, se c
       label: { type: 'string', short: 'l' },
       description: { type: 'string', short: 'd' },
       protocols: { type: 'string', short: 'p' },
+      ports: { type: 'string' },
       bidirectional: { type: 'boolean' },
       status: { type: 'string' },
     },
@@ -200,6 +234,11 @@ Si ya existe la relación al revés, se vuelve bidireccional; si ya existe, se c
           label: str(v.label),
           description: str(v.description),
           protocols: list(v.protocols as string | undefined),
+          ports: list(v.ports as string | undefined)?.map((p) => {
+            const n = Number(p.replace(/^:/, ''));
+            if (!Number.isInteger(n)) throw new UsageError(`Puerto inválido: ${p}`);
+            return n;
+          }),
           direction: v.bidirectional ? 'bidirectional' : undefined,
           status: oneOf<Status>(v.status, STATUSES, 'status'),
         },
@@ -209,13 +248,14 @@ Si ya existe la relación al revés, se vuelve bidireccional; si ya existe, se c
   },
   layout: {
     usage: 'layout <lienzo>',
-    summary: 'Ordena un lienzo automáticamente (por capas siguiendo las relaciones)',
+    summary: 'Ordena un lienzo automáticamente (ELK, como Shift+L en la app)',
     help: `Opciones:
-  --ids <a,b,c>            Ordena solo estos elementos (dos o más)`,
-    options: { ids: { type: 'string' } },
+  --ids <a,b,c>            Ordena solo estos elementos (dos o más)
+  --fit-frames             No mueve nada: ajusta cada nodo o grupo a lo que contiene`,
+    options: { ids: { type: 'string' }, 'fit-frames': { type: 'boolean' } },
     run: async (io, pos, v) => {
       need(pos, 1, 'layout <lienzo>');
-      return layout(io, await openWorkspace(io, v), pos[0]!, { ids: list(v.ids as string | undefined), json: !!v.json });
+      return layout(io, await openWorkspace(io, v), pos[0]!, { ids: list(v.ids as string | undefined), json: !!v.json, fitFrames: !!v['fit-frames'] });
     },
   },
   diff: {

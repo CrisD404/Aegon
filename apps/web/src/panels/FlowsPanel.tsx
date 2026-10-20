@@ -30,6 +30,8 @@ import {
   type FlowStep,
   type Id,
   type LeafStep,
+  levelRank,
+  levelLabel,
 } from '@aegon/core';
 import { Glyph } from '@aegon/icons';
 import { useUi, type StepPath } from '../store/ui.ts';
@@ -321,8 +323,8 @@ function FlowEditor({ flow }: { flow: Flow }) {
               value={flow.view}
               onChange={(v) => updateFlow(flow.id, { view: v }, 'view')}
               options={Object.values(views)
-                .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name))
-                .map((v) => ({ value: v.id, label: `L${v.level} · ${v.name}` }))}
+                .sort((a, b) => levelRank(a.level) - levelRank(b.level) || a.name.localeCompare(b.name))
+                .map((v) => ({ value: v.id, label: `${levelLabel(v.level)} · ${v.name}` }))}
               placeholder="Lienzo actual"
             />
           </div>

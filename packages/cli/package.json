@@ -22,7 +22,8 @@
     "@aegon/core": "workspace:*",
     "@aegon/format-yaml": "workspace:*",
     "@aegon/git": "workspace:*",
-    "@aegon/storage": "workspace:*"
+    "@aegon/storage": "workspace:*",
+    "elkjs": "0.12.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0"

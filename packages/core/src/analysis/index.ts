@@ -1,6 +1,7 @@
 import { ancestorsOf, descendantsOf, sortedValues, type Model } from '../model/index.ts';
 import type { ElementKind, Id, Risk, Status } from '../schema/index.ts';
 import { suggestProtocols } from '../catalog/index.ts';
+import { inEnvironment, isNetworkRelation } from '../deployment/index.ts';
 import { validateModel, type Diagnostic } from '../rules/index.ts';
 
 /**
@@ -116,6 +117,41 @@ function c4StyleViolations(model: Model): Diagnostic[] {
     if ((from.kind === 'actor' && to.kind === 'store') || (from.kind === 'store' && to.kind === 'actor')) {
       out.push({ severity: 'warning', code: 'actor-to-store', message: `"${from.name}" → "${to.name}": una persona no accede directo a una base de datos; pasá por el contenedor que la usa`, entity });
     }
+    // Tráfico sin cifrar: HTTP sin TLS o puerto 80.
+    if (rel.protocols?.includes('http') || rel.ports?.includes(80)) {
+      out.push({ severity: 'warning', code: 'plaintext', message: `"${from.name}" → "${to.name}" viaja sin cifrar (HTTP o puerto 80)`, entity });
+    }
+  }
+  out.push(...deploymentCoverage(model));
+  return out;
+}
+
+/**
+ * Cobertura del despliegue: en cada ambiente que tiene un lienzo de despliegue, los contenedores
+ * de los sistemas desplegados (o del sistema del lienzo) deberían tener alguna instancia.
+ */
+function deploymentCoverage(model: Model): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  const views = sortedValues(model.views).filter((v) => v.level === 'deployment' && v.environment);
+  const envs = [...new Set(views.map((v) => v.environment!))];
+  const instances = sortedValues(model.elements).filter((el) => el.kind === 'instance');
+  for (const env of envs) {
+    const deployed = new Set(instances.filter((i) => i.kind === 'instance' && inEnvironment(i, env)).map((i) => (i.kind === 'instance' ? i.instance.of : '')));
+    // Sistemas en juego: los de los lienzos de ese ambiente y los que ya tienen algo desplegado.
+    const systems = new Set<Id>(views.filter((v) => v.environment === env && v.scope).map((v) => v.scope!));
+    for (const id of deployed) {
+      const sys = [model.elements[id], ...ancestorsOf(model, id)].find((e) => e?.kind === 'system');
+      if (sys && model.elements[id]?.kind !== 'system') systems.add(sys.id);
+    }
+    const envName = model.workspace.environments?.find((e) => e.id === env)?.name ?? env;
+    for (const sys of systems) {
+      for (const id of descendantsOf(model, sys)) {
+        const el = model.elements[id];
+        if (!el || !(el.kind === 'container' || el.kind === 'store' || el.kind === 'bus')) continue;
+        if (!inEnvironment(el, env) || deployed.has(id)) continue;
+        out.push({ severity: 'warning', code: 'not-deployed', message: `"${el.name}" no tiene ninguna instancia en ${envName}`, entity: { type: 'element', id } });
+      }
+    }
   }
   return out;
 }
@@ -129,8 +165,12 @@ function findOrphans(model: Model): ElementRef[] {
       for (const a of ancestorsOf(model, end)) touched.add(a.id);
     }
   }
+  // Los nodos de despliegue alojan, no se relacionan; las instancias heredan las relaciones de lo que despliegan.
+  for (const el of Object.values(model.elements)) {
+    if (el.kind === 'instance' && touched.has(el.instance.of)) touched.add(el.id);
+  }
   return sortedValues(model.elements)
-    .filter((el) => el.kind !== 'group' && !touched.has(el.id))
+    .filter((el) => el.kind !== 'group' && el.kind !== 'node' && !touched.has(el.id))
     .map((el) => ({ id: el.id, name: el.name, kind: el.kind }));
 }
 
@@ -171,6 +211,8 @@ function findCycles(model: Model): CycleFinding[] {
     via.get(key)!.add(rel);
   };
   for (const rel of sortedValues(model.relations)) {
+    // Los caminos de red (despliegue) no son dependencias lógicas.
+    if (isNetworkRelation(model, rel)) continue;
     add(rel.from, rel.to, rel.id);
     if (rel.direction === 'bidirectional') add(rel.to, rel.from, rel.id);
   }

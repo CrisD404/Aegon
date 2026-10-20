@@ -9,7 +9,7 @@ mi-arquitectura/
 ├─ aegon.yaml                  # manifiesto (schema: 2)
 ├─ AGENTS.md                   # guía del formato para agentes (Aegon la genera si no existe)
 ├─ model/
-│  ├─ elements/<id>.yaml       # actor | system | container | component | store | bus | group
+│  ├─ elements/<id>.yaml       # actor | system | container | component | store | bus | group | node | infra | instance
 │  └─ relations/<id>.yaml
 ├─ views/<id>.yaml             # lienzos: nivel, scope, posiciones y estilo de relaciones
 ├─ flows/<id>.yaml             # flujos: pasos que se reproducen como presentación
@@ -45,6 +45,9 @@ desde los esquemas zod de `@aegon/core`).
 | `store` | 1–3 | `system` o `container` | `store: { engine, customEngine, customIcon, type, version, managed }` |
 | `bus` | 1–3 | `system` | `bus: { broker, customBroker, customIcon, type, topics }` |
 | `group` | 1–3 | `group` | `group: { provider, region, account, cidr }` |
+| `node` | despliegue | `node` | `node: { type, provider, region, account, size, instances }`, `technology`, `addresses`, `resource`, `risk` |
+| `infra` | despliegue | `node` | `infra: { type }`, `technology`, `addresses`, `resource`, `risk` |
+| `instance` | despliegue | `node` | `instance: { of, replicas }`, `addresses`, `resource` |
 
 Campos comunes: `name`, `description`, `docs` (Markdown), `groups`, `scope` (`internal` por
 defecto, `external`), `status` (`live` por defecto, `planned`, `deprecated`, `retired`), `tags`,
@@ -105,6 +108,8 @@ protocols: [ jdbc ]
   identidad (`oauth2`, `oidc`, `saml`, `ldap`, `kerberos`), correo (`smtp`, `imap`) y red (`tcp`,
   `udp`, `ssh`, `dns`, `vpn`). La app sugiere primero los que encajan con el destino (JDBC hacia
   PostgreSQL, Kafka hacia un bus Kafka, HTTPS/REST hacia una API).
+- `ports` son los puertos de destino (`ports: [ 443, 80 ]`); la app los muestra junto a los
+  protocolos (`[HTTPS :443, :80]`). Los protocolos de red incluyen también `bgp` y `tds` (SQL Server).
 - `direction` es `outgoing` por defecto. Conviene conectar los elementos más específicos: en los
   niveles superiores Aegon dibuja la relación **implícita** entre los ancestros que sí están en el
   lienzo (punteada, una sola por par).
@@ -124,13 +129,66 @@ edges:              # solo las relaciones con estilo distinto del default
   payments-api--payments-db: { shape: step }
 ```
 
+## Despliegue
+
+Un lienzo `level: deployment` muestra dónde corre el software en **un ambiente**
+(`environment`, un ID de `environments` del manifiesto) y, opcionalmente, de un sistema (`scope`).
+Es el diagrama de despliegue de C4:
+
+- **Nodos** (`kind: node`): lo que aloja software. `node.type` es `datacenter`, `cloud` (nube o
+  cuenta), `region`, `zone`, `network` (VPC/VNet), `subnet`, `cluster`, `namespace`, `server`, `vm`,
+  `runtime`, `device` u `other`. Se anidan con `parent` y se dibujan como marcos.
+- **Infraestructura** (`kind: infra`): por donde pasa el tráfico. `infra.type` es `firewall`,
+  `load-balancer`, `dns`, `gateway`, `ingress`, `egress`, `nat`, `vpn`, `link` (enlace dedicado),
+  `security-group`, `waf`, `cdn`, `proxy`, `router` u `other`.
+- **Instancias** (`kind: instance`): un container, store, bus o system desplegado en un nodo
+  (`instance.of`), con `replicas`. En el lienzo toman el color y el ícono de lo que despliegan.
+- `addresses` (IPs, CIDRs, hosts, URLs) y `resource` (`vpc-…`, `i-…`, un ARN) se muestran en los
+  nodos. `environments` dice en qué ambientes existe cada uno (sin el campo: en todos).
+
+```yaml
+# views/home-banking-despliegue-qa.yaml
+id: home-banking-despliegue-qa
+name: Home Banking · Despliegue QA
+level: deployment
+scope: home-banking
+environment: qa
+nodes:
+  aws: { x: 1800, y: 180, w: 1320, h: 662 }
+  vpc-qa: { x: 2240, y: 244, w: 840, h: 558 }
+  alb-qa: { x: 2280, y: 308 }
+  web-monitoreo-qa: { x: 2740, y: 436 }
+```
+
+**Relaciones en el despliegue.** Las relaciones entre contenedores no se repiten: Aegon las
+proyecta solas sobre las instancias del lienzo. Si el lienzo ya muestra un **camino de red**
+explícito entre dos instancias (actor → firewall → balanceador → instancia), la proyección se
+omite, porque el camino ya la cuenta. Los tramos de red (relaciones con nodos, infraestructura o
+instancias) se dibujan en azul punteado y pueden llegar a un nodo, por ejemplo un enlace que
+entra a una VPC.
+
+## Datos del documento
+
+`aegon.yaml` guarda también lo que identifica al documento cuando se comparte: `code` (por
+ejemplo `ARQ-1024`), `version`, `date` (AAAA-MM-DD), `architect` (autor) y `organization`
+(unidad). Aparecen en el **cartel** de las exportaciones a PNG y PDF, junto con el lienzo, su
+nivel, el ambiente y el sistema.
+
 ## Reglas que valida Aegon
 
 - `parent`, `groups`, `from`, `to`, `scope` y las claves de `nodes` apuntan a elementos existentes.
 - Padres válidos según la tabla; sin ciclos.
 - Los grupos no tienen relaciones y no puede haber dos relaciones entre el mismo par.
 - Un lienzo L2 abre un `system` y uno L3 un `container`; cada nivel acepta ciertos tipos.
-- Avisos: containers o componentes sin padre, elementos que no están en ningún lienzo.
+- Un lienzo de despliegue necesita un `environment` del workspace y solo ubica lo que vale para
+  ese ambiente; una instancia despliega un container, store, bus o system existente.
+- Avisos:
+  - Containers o componentes sin padre, e instancias fuera de un nodo.
+  - Elementos que valen en ambientes donde su nodo no existe.
+  - Elementos que no están en ningún lienzo.
+- `aegon lint` y `analyze` suman:
+  - Tráfico sin cifrar (HTTP o puerto 80).
+  - Contenedores sin instancia en un ambiente que tiene lienzo de despliegue.
 
 Un archivo con YAML inválido o que no cumple el esquema se reporta (con su ruta) y se omite: el
 resto del workspace abre igual.

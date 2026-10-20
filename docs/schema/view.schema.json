@@ -26,10 +26,20 @@
         {
           "type": "number",
           "const": 3
+        },
+        {
+          "type": "string",
+          "const": "deployment"
         }
       ]
     },
     "scope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$"
+    },
+    "environment": {
       "type": "string",
       "minLength": 1,
       "maxLength": 80,

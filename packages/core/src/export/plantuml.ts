@@ -1,8 +1,9 @@
 import type { Model } from '../model/index.ts';
 import type { Element, Id, View } from '../schema/index.ts';
 import { OpError } from '../ops/index.ts';
-import { viewEdges } from '../ops/commands.ts';
-import { aliasMap, edgeLabel, frameView, isExternalDeep, protocolsText, techText, viewsToExport } from './shared.ts';
+import { allViewEdges } from '../ops/commands.ts';
+import { aliasMap, deploymentDetails, deploymentTree, edgeLabel, frameView, isExternalDeep, protocolsText, techText, viewsToExport, type DeploymentTreeNode } from './shared.ts';
+import { INFRA_TYPE_LABEL, NODE_TYPE_LABEL } from '../catalog/index.ts';
 
 /**
  * Exporta lienzos a C4-PlantUML (biblioteca estándar `<C4/...>` de PlantUML). Cada lienzo es un
@@ -37,8 +38,46 @@ function elementLine(model: Model, el: Element, alias: string): string {
   return `${m}(${alias}, ${str(el.name)}, ${str(techText(el))}, ${str(description)})`;
 }
 
+function deploymentLines(model: Model, view: View, a: (id: Id) => string): string[] {
+  const lines: string[] = [];
+  const emit = (n: DeploymentTreeNode, indent: string) => {
+    const el = n.element;
+    const details = deploymentDetails(el);
+    const descr = [el.description, details].filter(Boolean).join(' · ');
+    if (el.kind === 'node') {
+      const type = [NODE_TYPE_LABEL[el.node.type], techText(el)].filter(Boolean).join(': ');
+      lines.push(`${indent}Deployment_Node(${a(el.id)}, ${str(el.name)}, ${str(type)}, ${str(descr)}) {`);
+      for (const c of n.children) emit(c, `${indent}  `);
+      lines.push(`${indent}}`);
+    } else if (el.kind === 'infra') {
+      const type = [INFRA_TYPE_LABEL[el.infra.type], techText(el)].filter(Boolean).join(': ');
+      lines.push(`${indent}Node(${a(el.id)}, ${str(el.name)}, ${str(type)}, ${str(descr)})`);
+    } else if (el.kind === 'instance') {
+      const target = model.elements[el.instance.of];
+      const m = target ? macro(model, target) : 'Container';
+      if (m.startsWith('Person') || m.startsWith('System')) lines.push(`${indent}${m}(${a(el.id)}, ${str(el.name)}, ${str(descr)})`);
+      else lines.push(`${indent}${m}(${a(el.id)}, ${str(el.name)}, ${str(target ? techText(target) : '')}, ${str(descr)})`);
+    } else lines.push(`${indent}${elementLine(model, el, a(el.id))}`);
+  };
+  for (const root of deploymentTree(model, view)) emit(root, '');
+  return lines;
+}
+
 export function viewToPlantUml(model: Model, view: View, aliases = aliasMap(model)): string {
   const a = (id: Id) => aliases.get(id)!;
+  if (view.level === 'deployment') {
+    const lines = [`@startuml ${view.id}`, '!include <C4/C4_Deployment>', '', `title ${view.name.replace(/\r?\n/g, ' ')}`, ''];
+    lines.push('AddRelTag("implicita", $lineStyle = DashedLine())', '', ...deploymentLines(model, view, a));
+    const edges = allViewEdges(model, view);
+    if (edges.length) lines.push('');
+    for (const edge of edges) {
+      const fn = edge.bidirectional ? 'BiRel' : 'Rel';
+      const tags = edge.implied ? ', $tags="implicita"' : '';
+      lines.push(`${fn}(${a(edge.from)}, ${a(edge.to)}, ${str(edgeLabel(edge))}, ${str(protocolsText(edge.relations))}${tags})`);
+    }
+    lines.push('', '@enduml');
+    return `${lines.join('\n')}\n`;
+  }
   // C4_Component incluye todo (una base de un sistema puede aparecer en un lienzo L1).
   const lines = [`@startuml ${view.id}`, '!include <C4/C4_Component>', '', `title ${view.name.replace(/\r?\n/g, ' ')}`, ''];
   lines.push('AddRelTag("implicita", $lineStyle = DashedLine())', '');
@@ -58,7 +97,7 @@ export function viewToPlantUml(model: Model, view: View, aliases = aliasMap(mode
   }
   for (const el of framed.loose) lines.push(elementLine(model, el, a(el.id)));
 
-  const edges = viewEdges(model, view);
+  const edges = allViewEdges(model, view);
   if (edges.length) lines.push('');
   for (const edge of edges) {
     const fn = edge.bidirectional ? 'BiRel' : 'Rel';

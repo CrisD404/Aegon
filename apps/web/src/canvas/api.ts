@@ -32,7 +32,10 @@ export const canvasApi = {
   /** Mueve la vista (sin cambiar el zoom) para que esos nodos se vean enteros. */
   reveal: (_ids: Id[]): void => {},
   zoomIn: (): void => {},
+  /** Zoom al 100 % sobre el centro de lo que se ve. */
+  zoomReset: (): void => {},
   zoomOut: (): void => {},
   /** Abre el componente fantasma en el centro visible del lienzo. */
   ghostAtCenter: (_kind?: ElementKind): void => {},
 };
+

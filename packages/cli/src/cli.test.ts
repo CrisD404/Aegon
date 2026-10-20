@@ -178,6 +178,37 @@ describe('aegon connect', () => {
   });
 });
 
+describe('aegon add (despliegue)', () => {
+  it('nodos, infraestructura e instancias con direcciones, ambientes y puertos', async () => {
+    const base = applyOp(sampleModel(), {
+      type: 'batch',
+      ops: [
+        { type: 'workspace.update', patch: { environments: [{ id: 'qa', name: 'QA' }] } },
+        { type: 'view.add', view: { id: 'despliegue', name: 'Despliegue', level: 'deployment', environment: 'qa', nodes: {} } },
+      ],
+    }).model;
+    const dir = tempWorkspace(base);
+    expect((await cli(dir, 'add', 'node', 'OCP', '--node-type', 'cluster', '--provider', 'openshift', '--size', 'm5.2xlarge', '--view', 'despliegue')).code).toBe(0);
+    const inst = await cli(dir, 'add', 'instance', '--of', 'api', '--parent', 'ocp', '--env', 'qa', '--replicas', '3', '--view', 'despliegue');
+    expect(inst.code).toBe(0);
+    expect(inst.out).toContain('(api-qa)');
+    expect((await cli(dir, 'add', 'infra', 'Egress', '--infra-type', 'egress', '--parent', 'ocp', '--addresses', '10.0.0.1,10.0.0.2', '--view', 'despliegue')).code).toBe(0);
+    expect((await cli(dir, 'connect', 'api-qa', 'egress', '--ports', '443,:80', '-p', 'https')).code).toBe(0);
+    expect((await cli(dir, 'add', 'instance')).code).toBe(2);
+    expect((await cli(dir, 'layout', 'despliegue', '--fit-frames')).code).toBe(0);
+
+    const model = await modelOnDisk(dir);
+    expect(model.elements['api-qa']).toMatchObject({ kind: 'instance', name: 'API', parent: 'ocp', environments: ['qa'], instance: { of: 'api', replicas: 3 } });
+    expect(model.elements.egress).toMatchObject({ infra: { type: 'egress' }, addresses: ['10.0.0.1', '10.0.0.2'] });
+    expect(model.relations['api-qa--egress']).toMatchObject({ protocols: ['https'], ports: [443, 80] });
+    const ocp = model.views.despliegue!.nodes.ocp!;
+    const api = model.views.despliegue!.nodes['api-qa']!;
+    expect(api.x).toBeGreaterThan(ocp.x);
+    expect(api.y).toBeGreaterThan(ocp.y);
+    expect((await cli(dir, 'validate')).code).toBe(0);
+  });
+});
+
 describe('aegon layout', () => {
   it('ordena el lienzo por capas y reescribe solo su archivo', async () => {
     const dir = tempWorkspace(sampleModel());

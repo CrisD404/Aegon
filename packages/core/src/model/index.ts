@@ -1,5 +1,6 @@
 import type { Comment, Element, ElementKind, Flow, Id, Relation, View, WorkspaceMeta } from '../schema/index.ts';
 import { SCHEMA_VERSION } from '../schema/index.ts';
+import { levelRank } from '../rules/hierarchy.ts';
 
 /**
  * Modelo en memoria de un workspace. Es inmutable: cada operación devuelve un modelo nuevo
@@ -195,8 +196,9 @@ export function parentViewOf(model: Model, view: View): View | undefined {
     const parentView = childViewOf(model, scopeEl.parent);
     if (parentView) return parentView;
   }
-  const containing = viewsContaining(model, view.scope).filter((v) => v.level < view.level);
-  containing.sort((a, b) => b.level - a.level || a.id.localeCompare(b.id));
+  const rank = levelRank(view.level);
+  const containing = viewsContaining(model, view.scope).filter((v) => levelRank(v.level) < rank);
+  containing.sort((a, b) => levelRank(b.level) - levelRank(a.level) || a.id.localeCompare(b.id));
   if (containing[0]) return containing[0];
   return Object.values(model.views).find((v) => v.level === 1);
 }

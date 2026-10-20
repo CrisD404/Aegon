@@ -31,13 +31,13 @@ test('Ctrl+F busca en el lienzo y recorre las coincidencias', async ({ page }) =
   await expect(page.getByTestId('canvas-search')).toBeHidden();
 });
 
-test('el modo foco atenúa lo que no es dependencia directa', async ({ page }) => {
+test('el foco en la selección viene activado y se apaga desde Vista', async ({ page }) => {
   await page.getByTestId('node-api-gateway').click();
-  await page.getByTestId('dock-focus').click();
   await expect.poll(() => opacityOf(page, 'banking-db')).toBeLessThan(0.5);
   expect(await opacityOf(page, 'cuentas-api')).toBe(1);
   expect(await opacityOf(page, 'web-app')).toBe(1);
-  await page.getByTestId('dock-focus').click();
+  await page.getByTestId('view-settings').click();
+  await page.getByTestId('view-settings-panel').getByRole('switch', { name: /^Foco en la selección/ }).click();
   await expect.poll(() => opacityOf(page, 'banking-db')).toBe(1);
 });
 

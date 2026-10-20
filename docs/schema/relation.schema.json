@@ -33,6 +33,14 @@
         "type": "string"
       }
     },
+    "ports": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535
+      }
+    },
     "direction": {
       "type": "string",
       "enum": [

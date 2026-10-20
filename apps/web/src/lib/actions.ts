@@ -17,6 +17,10 @@ import {
   type NodeLayout,
   type Op,
   type View,
+  levelRank,
+  canHaveParent,
+  newInstance,
+  fitFramesOp,
 } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
@@ -53,12 +57,19 @@ export function createElementAt(
   const model = ws().model;
   const size = sizeOf({ kind });
   const centered = { x: Math.round(at.x - size.w / 2), y: Math.round(at.y - size.h / 2) };
+  const fields: Partial<Element> = { ...opts.fields };
+  // En un lienzo de despliegue lo nuevo es de su ambiente (salvo lo que suele ser compartido:
+  // un datacenter, una nube, una región).
+  if (view.level === 'deployment' && view.environment && !fields.environments && (kind === 'infra' || kind === 'instance' || kind === 'node')) {
+    const nodeType = kind === 'node' ? (fields as { node?: { type?: string } }).node?.type : undefined;
+    if (!nodeType || !['datacenter', 'cloud', 'region', 'zone'].includes(nodeType)) fields.environments = [view.environment];
+  }
   const { op, id } = createElementOp(model, {
     kind,
     name: name.trim() || KIND_LABEL[kind],
     view: view.id,
     at: centered,
-    fields: opts.fields,
+    fields,
   });
   const ops: Op[] = [op, ...groupMembershipOps(model, view, id, kind, centered, size)];
   let relationId: Id | null = null;
@@ -74,7 +85,23 @@ export function createElementAt(
   return id;
 }
 
-/** Si el nodo nuevo cae dentro de un grupo del lienzo, lo suma como miembro. */
+/** Marco del lienzo (el más chico) que contiene el punto: un nodo de despliegue o un grupo. */
+export function frameAt(model: ReturnType<typeof ws>['model'], view: View, kind: ElementKind, point: { x: number; y: number }): Id | null {
+  const deployment = kind === 'node' || kind === 'infra' || kind === 'instance';
+  let best: { id: Id; area: number } | null = null;
+  for (const [gid, layout] of Object.entries(view.nodes)) {
+    const g = model.elements[gid];
+    if (!g || g.kind !== (deployment ? 'node' : 'group')) continue;
+    const s = sizeOf(g, layout);
+    if (point.x >= layout.x && point.x <= layout.x + s.w && point.y >= layout.y && point.y <= layout.y + s.h) {
+      const area = s.w * s.h;
+      if (!best || area < best.area) best = { id: gid, area };
+    }
+  }
+  return best?.id ?? null;
+}
+
+/** Si el nodo nuevo cae dentro de un marco del lienzo, queda dentro (padre o membresía). */
 function groupMembershipOps(
   model: ReturnType<typeof ws>['model'],
   view: View,
@@ -83,26 +110,38 @@ function groupMembershipOps(
   at: { x: number; y: number },
   size: { w: number; h: number },
 ): Op[] {
-  const cx = at.x + size.w / 2;
-  const cy = at.y + size.h / 2;
-  let best: { id: Id; area: number } | null = null;
-  for (const [gid, layout] of Object.entries(view.nodes)) {
-    const g = model.elements[gid];
-    if (g?.kind !== 'group') continue;
-    const s = sizeOf(g, layout);
-    if (cx >= layout.x && cx <= layout.x + s.w && cy >= layout.y && cy <= layout.y + s.h) {
-      const area = s.w * s.h;
-      if (!best || area < best.area) best = { id: gid, area };
-    }
-  }
-  if (!best) return [];
-  return [
-    {
-      type: 'element.update',
-      id,
-      patch: kind === 'group' ? { parent: best.id } : { groups: [best.id] },
-    },
+  const frame = frameAt(model, view, kind, { x: at.x + size.w / 2, y: at.y + size.h / 2 });
+  if (!frame) return [];
+  const usesParent = kind === 'group' || kind === 'node' || kind === 'infra' || kind === 'instance';
+  if (usesParent && !canHaveParent(kind, model.elements[frame]!.kind)) return [];
+  return [{ type: 'element.update', id, patch: usesParent ? { parent: frame } : { groups: [frame] } }];
+}
+
+/**
+ * Despliega un contenedor (o base, bus, sistema) en el lienzo de despliegue actual: crea su
+ * instancia para el ambiente del lienzo, dentro del nodo donde cae el punto.
+ */
+export function deployAt(of: Id, at: { x: number; y: number }, opts: { connectFrom?: Id } = {}): Id | null {
+  const view = activeView();
+  const model = ws().model;
+  const target = model.elements[of];
+  if (!view || view.level !== 'deployment' || !target) return null;
+  const parent = frameAt(model, view, 'instance', at) ?? undefined;
+  const instance = newInstance(model, of, { parent, environment: view.environment });
+  const size = sizeOf(instance);
+  const pos = { x: Math.round(at.x - size.w / 2), y: Math.round(at.y - size.h / 2) };
+  const ops: Op[] = [
+    { type: 'element.add', element: instance },
+    { type: 'view.place', view: view.id, nodes: { [instance.id]: pos } },
   ];
+  if (opts.connectFrom) {
+    const rel = connectOp(model, opts.connectFrom, instance.id);
+    if (rel.op) ops.push(rel.op);
+  }
+  if (!dispatch({ type: 'batch', ops, label: `Desplegar ${target.name}` })) return null;
+  ui().markFresh([instance.id]);
+  ui().select([instance.id]);
+  return instance.id;
 }
 
 export function placeExisting(
@@ -118,6 +157,10 @@ export function placeExisting(
     ui().select([id]);
     ui().toast(`"${el.name}" ya está en este lienzo`);
     return false;
+  }
+  // Un contenedor (o base, bus) que cae en un despliegue se despliega: se crea su instancia.
+  if (view.level === 'deployment' && (el.kind === 'container' || el.kind === 'store' || el.kind === 'bus')) {
+    return !!deployAt(id, at, opts);
   }
   const problem = placementProblem(model, view, el);
   if (problem) {
@@ -191,7 +234,7 @@ export function revealElement(id: Id) {
     ui().openView(current.id, { focus: id });
     return;
   }
-  const view = viewsContaining(model, id).sort((a, b) => a.level - b.level)[0];
+  const view = viewsContaining(model, id).sort((a, b) => levelRank(a.level) - levelRank(b.level))[0];
   if (view) {
     ui().openView(view.id, { transition: 'fade', focus: id });
     return;
@@ -412,7 +455,7 @@ export function deleteView(id: Id) {
   if (!view) return;
   if (!dispatch({ type: 'view.remove', id }, `Eliminar lienzo ${view.name}`)) return;
   if (ui().activeViewId === id) {
-    const next = Object.values(ws().model.views).sort((a, b) => a.level - b.level)[0];
+    const next = Object.values(ws().model.views).sort((a, b) => levelRank(a.level) - levelRank(b.level))[0];
     ui().openView(next?.id ?? null);
   }
   ui().toast(`Lienzo "${view.name}" eliminado (los elementos siguen en el modelo)`, 'info', {
@@ -423,4 +466,16 @@ export function deleteView(id: Id) {
 
 export function setDefaultView(id: Id) {
   dispatch({ type: 'workspace.update', patch: { defaultView: id } }, 'Lienzo por defecto');
+}
+
+/** Ajusta los marcos (nodos de despliegue y grupos) del lienzo a lo que contienen. */
+export function fitFrames() {
+  const view = activeView();
+  if (!view) return;
+  const op = fitFramesOp(ws().model, view.id);
+  if (!op) {
+    ui().toast('Los marcos ya envuelven a su contenido');
+    return;
+  }
+  dispatch(op, 'Ajustar marcos');
 }

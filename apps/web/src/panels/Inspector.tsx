@@ -35,12 +35,18 @@ import {
   type Risk,
   type StoreDetails,
   type View,
+  allViewEdges,
+  environmentsOf,
+  levelLabel,
+  relationTechnology,
 } from '@aegon/core';
 import { Glyph, TechIcon, GLYPH_NAMES, type GlyphName } from '@aegon/icons';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import { deleteElement, drillInto, removeSelectionFromView, renameView } from '../lib/actions.ts';
-import { IMPLIED_PREFIX } from '../canvas/derive.ts';
+import { IMPLIED_PREFIX, PROJECTED_PREFIX } from '../canvas/derive.ts';
+import { DeploymentFields } from './DeploymentFields.tsx';
+import { viewBadge } from '../lib/view-badge.ts';
 import { elementIcon, kindCaption } from '../canvas/nodes/ElementNode.tsx';
 import { Button, Field, IconButton, SectionTitle, Segmented, Select, Switch, TagInput, TextArea, TextInput, cn, type Suggestion } from '../ui/primitives.tsx';
 import { FinOpsFields } from './FinOpsFields.tsx';
@@ -59,6 +65,7 @@ export function Inspector() {
   if (selection.edges.length === 1) {
     const edgeId = selection.edges[0]!;
     if (edgeId.startsWith(IMPLIED_PREFIX)) return <ImpliedInspector id={edgeId} />;
+    if (edgeId.startsWith(PROJECTED_PREFIX) && view) return <ProjectedInspector id={edgeId} view={view} />;
     const rel = model.relations[edgeId];
     if (rel) return <RelationInspector key={rel.id} rel={rel} />;
   }
@@ -144,6 +151,7 @@ function ElementInspector({ el }: { el: Element }) {
   const text = (field: string) => (v: string) => update({ [field]: v.trim() ? v : null } as ElementPatch, field);
 
   const { icon, label } = elementIcon(el);
+  const target = el.kind === 'instance' ? model.elements[el.instance.of] : undefined;
   const views = viewsContaining(model, el.id);
   const tagsSuggest = useMemo(() => {
     const all = new Set<string>();
@@ -162,7 +170,7 @@ function ElementInspector({ el }: { el: Element }) {
             <TechIcon icon={icon} label={label} size={14} />
           </span>
         }
-        kind={kindCaption(el)}
+        kind={el.kind === 'instance' ? `Instancia · ${kindCaption(el, target)}` : kindCaption(el)}
         id={el.id}
         title={
           <input
@@ -206,6 +214,13 @@ function ElementInspector({ el }: { el: Element }) {
       {el.kind === 'store' ? <StoreFields el={el} update={update} /> : null}
       {el.kind === 'bus' ? <BusFields el={el} update={update} /> : null}
       {el.kind === 'group' ? <GroupFields el={el} update={update} /> : null}
+      {el.kind === 'node' || el.kind === 'infra' || el.kind === 'instance' ? <DeploymentFields el={el} update={update} /> : null}
+      {el.kind === 'node' || el.kind === 'infra' ? (
+        <Field label="Tecnología" hint="Plataforma, producto o servicio">
+          <TagInput values={el.technology ?? []} onChange={(v) => update({ technology: v.length ? v : null }, 'technology')} suggest={techSuggest} placeholder="openshift, fortigate, route53…" renderChip={techChip} />
+        </Field>
+      ) : null}
+      {el.kind === 'node' || el.kind === 'infra' || el.kind === 'instance' ? <EnvironmentsField el={el} update={update} /> : null}
 
       {el.kind === 'system' || el.kind === 'container' || el.kind === 'component' ? (
         <>
@@ -221,7 +236,7 @@ function ElementInspector({ el }: { el: Element }) {
         </>
       ) : null}
 
-      {el.kind !== 'actor' && el.kind !== 'group' ? <RiskField value={el.risk} onChange={(v) => update({ risk: v ?? null }, 'risk')} /> : null}
+      {'risk' in el || (el.kind !== 'actor' && el.kind !== 'group' && el.kind !== 'instance') ? <RiskField value={'risk' in el ? el.risk : undefined} onChange={(v) => update({ risk: v ?? null }, 'risk')} /> : null}
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Estado">
@@ -285,7 +300,7 @@ function ViewLink({ view, focus }: { view: View; focus?: Id }) {
       onClick={() => useUi.getState().openView(view.id, { transition: 'fade', focus: focus ?? null })}
       className={cn('flex h-7 items-center gap-2 rounded-sm px-2 text-left text-[12.5px] hover:bg-hover', active ? 'text-fg' : 'text-fg-muted')}
     >
-      <span className="grid h-[18px] w-[22px] place-items-center rounded-xs bg-raised text-[10px] font-bold text-fg-subtle">L{view.level}</span>
+      <span className="grid h-[18px] min-w-[22px] place-items-center rounded-xs bg-raised px-1 text-[10px] font-bold text-fg-subtle">{viewBadge(view)}</span>
       <span className="truncate">{view.name}</span>
       {active ? <span className="ml-auto text-[11px] text-fg-subtle">actual</span> : null}
     </button>
@@ -560,6 +575,17 @@ function RelationInspector({ rel }: { rel: Relation }) {
           renderChip={protocolChip}
         />
       </Field>
+      <Field label="Puertos" hint="De destino">
+        <TagInput
+          values={(rel.ports ?? []).map(String)}
+          onChange={(v) => {
+            const ports = [...new Set(v.map((x) => Math.round(Number(x.replace(/^:/, '')))).filter((n) => Number.isInteger(n) && n >= 1 && n <= 65535))];
+            update({ ports: ports.length ? ports : null }, 'ports');
+          }}
+          placeholder="443, 8080…"
+          renderChip={(v) => <span className="font-mono text-[11px]">:{v}</span>}
+        />
+      </Field>
       <Field label="Descripción">
         <TextArea rows={3} value={rel.description ?? ''} onChange={(e) => update({ description: e.target.value || null }, 'description')} />
       </Field>
@@ -623,6 +649,71 @@ function ImpliedInspector({ id }: { id: string }) {
   );
 }
 
+/** Relación lógica dibujada entre instancias en un lienzo de despliegue. */
+function ProjectedInspector({ id, view }: { id: string; view: View }) {
+  const model = useWorkspace((s) => s.model);
+  const [from, to] = id.slice(PROJECTED_PREFIX.length).split('>');
+  const edge = allViewEdges(model, view).find((e) => e.projected && e.from === from && e.to === to);
+  return (
+    <Panel>
+      <Header icon={<Link2 size={15} className="text-fg-subtle" />} kind="Relación entre instancias" title={<div className="text-[15px] font-semibold">{model.elements[from!]?.name} → {model.elements[to!]?.name}</div>} />
+      <p className="m-0 text-[12.5px] leading-relaxed text-fg-muted">
+        Viene de la relación entre lo que despliegan estas instancias. Se dibuja porque el lienzo no muestra un camino de red entre ellas; si lo dibujás (por un balanceador, un egress…), esta línea desaparece.
+      </p>
+      <div className="flex flex-col gap-1">
+        {(edge?.relations ?? []).map((r) => (
+          <button key={r.id} type="button" onClick={() => useUi.getState().select([], [r.id])} className="flex flex-col rounded-sm border border-line px-2.5 py-2 text-left hover:bg-hover">
+            <span className="text-[12.5px] text-fg">
+              {model.elements[r.from]?.name} → {model.elements[r.to]?.name}
+            </span>
+            {r.label || relationTechnology(r) ? (
+              <span className="text-[11.5px] text-fg-subtle">
+                {r.label}
+                {relationTechnology(r) ? ` [${relationTechnology(r)}]` : ''}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/** Ambientes donde existe un elemento de despliegue (sin marcar ninguno: en todos). */
+function EnvironmentsField({ el, update }: { el: Element; update: (p: ElementPatch, f: string) => void }) {
+  const model = useWorkspace((s) => s.model);
+  const environments = environmentsOf(model);
+  if (!environments.length) return null;
+  const current = el.environments ?? [];
+  const toggle = (env: string) => {
+    const next = current.includes(env) ? current.filter((e) => e !== env) : environments.map((e) => e.id).filter((e) => e === env || current.includes(e));
+    update({ environments: next.length && next.length < environments.length ? next : null }, 'environments');
+  };
+  return (
+    <Field label="Ambientes" hint={current.length ? undefined : 'Todos'}>
+      <div className="flex flex-wrap gap-1">
+        {environments.map((env) => {
+          const on = current.length === 0 || current.includes(env.id);
+          return (
+            <button
+              key={env.id}
+              type="button"
+              onClick={() => toggle(env.id)}
+              aria-pressed={current.includes(env.id)}
+              className={cn(
+                'h-7 rounded-sm border px-2.5 text-[12px] transition-colors',
+                current.includes(env.id) ? 'border-accent bg-accent-soft text-fg' : on ? 'border-line text-fg-muted hover:bg-hover' : 'border-line text-fg-subtle hover:bg-hover',
+              )}
+            >
+              {env.name}
+            </button>
+          );
+        })}
+      </div>
+    </Field>
+  );
+}
+
 function MultiInspector({ count }: { count: number }) {
   return (
     <Panel>
@@ -641,11 +732,13 @@ function ViewInspector({ view }: { view: View }) {
   const [name, setName] = useState(view.name);
   useEffect(() => setName(view.name), [view.name]);
   const count = Object.keys(view.nodes).length;
+  const environments = environmentsOf(model);
+  const systems = sortedValues(model.elements).filter((e) => e.kind === 'system' && e.scope !== 'external');
   return (
     <Panel>
       <Header
-        icon={<span className="grid h-6 w-7 place-items-center rounded-sm bg-accent-soft text-[11px] font-bold text-accent">L{view.level}</span>}
-        kind={view.level === 1 ? 'Lienzo de contexto' : view.level === 2 ? 'Lienzo de contenedores' : 'Lienzo de componentes'}
+        icon={<span className="grid h-6 min-w-7 place-items-center rounded-sm bg-accent-soft px-1 text-[11px] font-bold text-accent">{viewBadge(view)}</span>}
+        kind={view.level === 1 ? 'Lienzo de contexto' : view.level === 2 ? 'Lienzo de contenedores' : view.level === 3 ? 'Lienzo de componentes' : `${levelLabel(view.level)} por ambiente`}
         id={view.id}
         title={
           <input
@@ -661,7 +754,26 @@ function ViewInspector({ view }: { view: View }) {
           />
         }
       />
-      {scope ? (
+      {view.level === 'deployment' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Ambiente">
+            <Select
+              value={view.environment}
+              onChange={(v) => v && dispatch({ type: 'view.update', id: view.id, patch: { environment: v } }, { label: 'Ambiente del lienzo' })}
+              options={environments.map((e) => ({ value: e.id, label: e.name }))}
+            />
+          </Field>
+          <Field label="Sistema">
+            <Select
+              value={view.scope}
+              onChange={(v) => dispatch({ type: 'view.update', id: view.id, patch: { scope: v ?? null } }, { label: 'Sistema del lienzo' })}
+              options={systems.map((s) => ({ value: s.id, label: s.name }))}
+              placeholder="Todos"
+            />
+          </Field>
+        </div>
+      ) : null}
+      {scope && view.level !== 'deployment' ? (
         <button type="button" onClick={() => useUi.getState().select([scope.id])} className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-left hover:bg-hover">
           <Glyph name={scope.kind} size={15} style={{ color: `var(--kind-${scope.kind})` }} />
           <span className="flex flex-col">

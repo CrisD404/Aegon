@@ -3,6 +3,7 @@ import { childLevelOf } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import { canvasApi } from '../canvas/api.ts';
+import { openExportDialog } from './flows.tsx';
 import {
   activeView,
   arrange,
@@ -36,6 +37,11 @@ export function useShortcuts() {
       if (mod && key === 'k') {
         e.preventDefault();
         ui.setPalette(!ui.paletteOpen);
+        return;
+      }
+      if (mod && e.shiftKey && key === 'e') {
+        e.preventDefault();
+        void openExportDialog();
         return;
       }
       if (mod && key === 's') {

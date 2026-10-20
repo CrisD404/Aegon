@@ -26,7 +26,7 @@ export type ElementPatch = Patch<DistributiveOmit<Element, 'id' | 'kind'>> & {
   [key: string]: unknown;
 };
 export type RelationPatch = Patch<Omit<Relation, 'id'>>;
-export type ViewPatch = Patch<Pick<View, 'name' | 'description' | 'extensions'>>;
+export type ViewPatch = Patch<Pick<View, 'name' | 'description' | 'environment' | 'scope' | 'extensions'>>;
 export type WorkspacePatch = Patch<Omit<WorkspaceMeta, 'schema' | 'id'>>;
 export type FlowPatch = Patch<Omit<Flow, 'id'>>;
 export type CommentPatch = Patch<Omit<Comment, 'id'>>;
@@ -406,8 +406,12 @@ function addView(model: Model, input: View): ApplyResult {
 function updateView(model: Model, id: Id, patch: ViewPatch): ApplyResult {
   const current = getView(model, id);
   for (const key of Object.keys(patch)) {
-    if (!['name', 'description', 'extensions'].includes(key)) {
+    if (!['name', 'description', 'environment', 'scope', 'extensions'].includes(key)) {
       throw new OpError('immutable-field', `"${key}" no se puede cambiar con view.update`);
+    }
+    // El elemento abierto define un L2/L3; en despliegue es solo un filtro y se puede cambiar.
+    if ((key === 'environment' || key === 'scope') && current.level !== 'deployment') {
+      throw new OpError('invalid-view', key === 'environment' ? 'Solo los lienzos de despliegue tienen ambiente' : 'El elemento que abre un lienzo L2/L3 no se puede cambiar');
     }
   }
   const next = parseView(applyPatch(current, patch));

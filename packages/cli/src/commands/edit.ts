@@ -1,4 +1,4 @@
-import { KIND_LABEL } from '@aegon/core';
+import { KIND_LABEL, fitFramesOp } from '@aegon/core';
 import { planAddElement, planConnect, planLayout, type AddElementInput, type ConnectInput } from '../edit.ts';
 import { json, planJson, planSummary, type Io } from '../io.ts';
 import type { Workspace } from '../workspace.ts';
@@ -53,8 +53,16 @@ export async function connect(io: Io, ws: Workspace, input: ConnectInput, opts: 
 }
 
 /** `aegon layout <lienzo>` */
-export async function layout(io: Io, ws: Workspace, viewRef: string, opts: { ids?: string[]; json: boolean }): Promise<number> {
-  const plan = planLayout(ws.model, viewRef, opts.ids);
+export async function layout(io: Io, ws: Workspace, viewRef: string, opts: { ids?: string[]; json: boolean; fitFrames?: boolean }): Promise<number> {
+  if (opts.fitFrames) {
+    const view = ws.view(viewRef);
+    const op = fitFramesOp(ws.model, view.id);
+    const written = op ? (await ws.apply(op)).plan : null;
+    if (opts.json) json(io, { view: view.id, ...(written ? planJson(written) : { written: [], deleted: [] }) });
+    else io.stdout(written ? `✓ Marcos de ${view.id} ajustados a su contenido\n  ${planSummary(written)}\n` : `✓ Los marcos de ${view.id} ya envuelven a su contenido\n`);
+    return 0;
+  }
+  const plan = await planLayout(ws.model, viewRef, opts.ids);
   const written = plan.op ? (await ws.apply(plan.op)).plan : null;
   if (opts.json) {
     json(io, { view: plan.view, moved: plan.moved, ...(written ? planJson(written) : { written: [], deleted: [] }) });

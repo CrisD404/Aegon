@@ -6,13 +6,20 @@ const normalize = (s: string) =>
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase();
 
-/** Texto donde se busca: nombre, ID, tecnología, tags, descripción, motor, broker y dueño. */
+/**
+ * Texto donde se busca: nombre, ID, tecnología, tags, descripción, motor, broker, dueño y, en
+ * despliegue, direcciones (IPs, hosts), ID del recurso, tamaño y lo que despliega una instancia.
+ */
 function haystack(el: Element): string {
   const parts: (string | undefined)[] = [el.name, el.id, el.description, el.owner, ...(el.tags ?? [])];
   if ('technology' in el) parts.push(...(el.technology ?? []));
   if ('store' in el) parts.push(el.store.engine, el.store.customEngine);
   if ('bus' in el) parts.push(el.bus.broker, el.bus.customBroker, ...(el.bus.topics ?? []));
   if ('role' in el) parts.push(el.role);
+  if ('addresses' in el) parts.push(...(el.addresses ?? []));
+  if ('resource' in el) parts.push(el.resource);
+  if (el.kind === 'node') parts.push(el.node.size, el.node.region, el.node.account);
+  if (el.kind === 'instance') parts.push(el.instance.of);
   return normalize(parts.filter(Boolean).join(' '));
 }
 

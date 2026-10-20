@@ -301,16 +301,18 @@ export function CommentsLayer({ view }: { view: View }) {
   const scale = 1 / zoom;
   return (
     <ViewportPortal>
-      {list.map((c) => (
-        <CommentPin
-          key={c.id}
-          comment={c}
-          pos={commentPosition(model, c)}
-          scale={scale}
-          open={open === c.id}
-        />
-      ))}
-      {draft && draft.view === view.id ? <DraftCard draft={draft} scale={scale} /> : null}
+      <div data-comments-layer style={{ display: 'contents' }}>
+        {list.map((c) => (
+          <CommentPin
+            key={c.id}
+            comment={c}
+            pos={commentPosition(model, c)}
+            scale={scale}
+            open={open === c.id}
+          />
+        ))}
+        {draft && draft.view === view.id ? <DraftCard draft={draft} scale={scale} /> : null}
+      </div>
     </ViewportPortal>
   );
 }

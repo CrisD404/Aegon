@@ -32,6 +32,10 @@ import {
   Sun,
   Undo2,
   Wand2,
+  FileText,
+  ImageDown,
+  Server,
+  Frame,
 } from 'lucide-react';
 import { KINDS_FOR_LEVEL, KIND_LABEL, sortedValues } from '@aegon/core';
 import { Glyph, TechIcon } from '@aegon/icons';
@@ -41,14 +45,18 @@ import { createFlow, playFlow } from '../lib/flow-actions.ts';
 import {
   exportCostsCsv,
   newWorkspaceFlow,
+  openDocumentSettings,
+  openExportDialog,
   openFinOpsSettings,
+  openNewDeploymentView,
   openPathFlow,
   openTemplates,
   saveSelectionAsTemplate,
   saveWorkspaceAsTemplate,
 } from '../lib/flows.tsx';
 import { isDesktop } from '../lib/tauri.ts';
-import { arrange, createView, goUp, revealElement } from '../lib/actions.ts';
+import { viewBadge } from '../lib/view-badge.ts';
+import { arrange, createView, fitFrames, goUp, revealElement } from '../lib/actions.ts';
 import { canvasApi } from '../canvas/api.ts';
 import { elementIcon } from '../canvas/nodes/ElementNode.tsx';
 
@@ -166,6 +174,14 @@ export function CommandPalette() {
                     onSelect={run(() => createView())}
                   >
                     Nuevo lienzo de contexto
+                  </Item>
+                  <Item
+                    query={query}
+                    value="crear nuevo lienzo de despliegue deployment ambiente infraestructura"
+                    icon={<Server size={14} />}
+                    onSelect={run(() => void openNewDeploymentView())}
+                  >
+                    Nuevo lienzo de despliegue…
                   </Item>
                 </Command.Group>
               ) : null}
@@ -309,6 +325,31 @@ export function CommandPalette() {
                 </Item>
                 <Item
                   query={query}
+                  value="ajustar marcos nodos grupos contenido tamaño"
+                  icon={<Frame size={14} />}
+                  onSelect={run(fitFrames)}
+                >
+                  Ajustar marcos al contenido
+                </Item>
+                <Item
+                  query={query}
+                  value="exportar imagen png pdf diagrama descargar"
+                  icon={<ImageDown size={14} />}
+                  shortcut="Ctrl ⇧ E"
+                  onSelect={run(() => void openExportDialog())}
+                >
+                  Exportar imagen o PDF…
+                </Item>
+                <Item
+                  query={query}
+                  value="datos del documento version fecha autor unidad codigo cartel"
+                  icon={<FileText size={14} />}
+                  onSelect={run(() => void openDocumentSettings())}
+                >
+                  Datos del documento…
+                </Item>
+                <Item
+                  query={query}
                   value="exportar costos csv finops"
                   icon={<Download size={14} />}
                   onSelect={run(exportCostsCsv)}
@@ -441,7 +482,7 @@ export function CommandPalette() {
                     query={query}
                     key={v.id}
                     value={`lienzo ${v.name} ${v.id}`}
-                    icon={<span className="font-mono text-[10px] font-bold">L{v.level}</span>}
+                    icon={<span className="font-mono text-[10px] font-bold">{viewBadge(v)}</span>}
                     onSelect={run(() => ui().openView(v.id, { transition: 'fade' }))}
                   >
                     {v.name}

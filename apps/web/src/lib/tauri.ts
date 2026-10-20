@@ -69,3 +69,8 @@ export async function watchFolder(root: string, onChange: (paths: string[]) => v
     void invoke<void>('watch_stop', { root });
   };
 }
+
+/** Guarda bytes (en base64) en una ruta elegida por el usuario. */
+export function saveFileDesktop(path: string, base64: string): Promise<void> {
+  return invoke<void>('save_file', { path, base64 });
+}

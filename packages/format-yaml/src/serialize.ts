@@ -26,17 +26,19 @@ import { agentsMd, GITATTRIBUTES, GITIGNORE } from './agents-md.ts';
 
 /** Orden canónico de claves: el YAML resultante es estable y fácil de revisar en un diff. */
 const ORDER = {
-  workspace: ['schema', 'id', 'name', 'description', 'organization', 'architect', 'defaultView', 'environments', 'finops', 'extensions'],
+  workspace: ['schema', 'id', 'name', 'description', 'organization', 'architect', 'code', 'version', 'date', 'defaultView', 'environments', 'finops', 'extensions'],
   element: [
     'id', 'kind', 'name', 'description', 'parent', 'groups', 'scope', 'status', 'risk', 'technology',
-    'containerType', 'role', 'store', 'bus', 'group', 'owner', 'tags', 'links', 'environments', 'finops',
-    'properties', 'docs', 'extensions',
+    'containerType', 'role', 'store', 'bus', 'group', 'node', 'infra', 'instance', 'addresses', 'resource', 'owner',
+    'tags', 'links', 'environments', 'finops', 'properties', 'docs', 'extensions',
   ],
-  relation: ['id', 'from', 'to', 'label', 'description', 'protocols', 'direction', 'status', 'tags', 'properties', 'extensions'],
-  view: ['id', 'name', 'level', 'scope', 'description', 'nodes', 'edges', 'extensions'],
+  relation: ['id', 'from', 'to', 'label', 'description', 'protocols', 'ports', 'direction', 'status', 'tags', 'properties', 'extensions'],
+  view: ['id', 'name', 'level', 'scope', 'environment', 'description', 'nodes', 'edges', 'extensions'],
   store: ['engine', 'customEngine', 'customIcon', 'type', 'version', 'managed'],
   bus: ['broker', 'customBroker', 'customIcon', 'type', 'topics'],
   group: ['provider', 'region', 'account', 'cidr'],
+  node: ['type', 'provider', 'region', 'account', 'size', 'instances'],
+  instance: ['of', 'replicas'],
   layout: ['x', 'y', 'w', 'h'],
   link: ['label', 'url'],
   edge: ['shape', 'hidden'],
@@ -73,6 +75,8 @@ export function canonicalElement(el: Element, environments: readonly string[] = 
   if ('store' in el && el.store) value.store = ordered(el.store, ORDER.store);
   if ('bus' in el && el.bus) value.bus = ordered(el.bus, ORDER.bus);
   if ('group' in el && el.group) value.group = ordered(el.group, ORDER.group);
+  if ('node' in el && el.node) value.node = ordered(el.node, ORDER.node);
+  if ('instance' in el && el.instance) value.instance = ordered(el.instance, ORDER.instance);
   if (el.links) value.links = el.links.map((l) => ordered(l, ORDER.link));
   if (el.properties) value.properties = orderedRecord(el.properties, (v) => v);
   if (el.finops) {

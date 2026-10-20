@@ -64,7 +64,8 @@ describe('servidor MCP', () => {
       ].sort(),
     );
     const add = tools.find((t) => t.name === 'add_element')!;
-    expect(add.inputSchema.required).toEqual(['kind', 'name']);
+    // El nombre es opcional solo para una instancia (toma el de lo que despliega).
+    expect(add.inputSchema.required).toEqual(['kind']);
     expect(tools.find((t) => t.name === 'get_view')!.annotations?.readOnlyHint).toBe(true);
     expect(tools.find((t) => t.name === 'remove_element')!.annotations?.destructiveHint).toBe(true);
     expect(mcp.client.getInstructions()).toContain('una sola relación por par');
@@ -247,6 +248,69 @@ describe('escritura', () => {
     const model = await modelOnDisk(dir);
     for (const n of names) expect(model.elements[n.toLowerCase()]).toBeDefined();
     expect(Object.keys(model.views.landscape!.nodes)).toHaveLength(4 + names.length);
+  });
+});
+
+describe('despliegue', () => {
+  it('ambientes, lienzo de despliegue, nodos, infraestructura, instancias, puertos y layout', async () => {
+    expect((await mcp.call('update_workspace', { date: '15/07/2026' })).text).toContain('AAAA-MM-DD');
+    const ws = await mcp.call('update_workspace', { environments: [{ id: 'qa', name: 'QA' }], code: 'ARQ-1024', version: 'v1.9', date: '2026-07-15' });
+    expect(ws.isError).toBe(false);
+
+    expect((await mcp.call('create_view', { level: 'deployment' })).text).toContain('environment');
+    expect((await mcp.call('create_view', { level: 'deployment', environment: 'prod' })).text).toContain('no está definido');
+    const view = (await mcp.call('create_view', { level: 'deployment', environment: 'qa', scope: 'banking' })).json;
+    expect(view.id).toBe('home-banking-despliegue-qa');
+
+    const D = view.id;
+    const dc = (await mcp.call('add_element', { kind: 'node', name: 'Datacenter', nodeType: 'datacenter', provider: 'onprem', view: D, x: 0, y: 0 })).json;
+    expect(dc.element).toMatchObject({ kind: 'node', node: { type: 'datacenter', provider: 'onprem' } });
+    await mcp.call('place', { view: D, positions: { datacenter: { x: 0, y: 0, w: 900, h: 600 } } });
+    const cluster = (await mcp.call('add_element', { kind: 'node', name: 'OCP', nodeType: 'cluster', technology: ['OpenShift'], parent: 'datacenter', size: 'm5.2xlarge', view: D })).json;
+    expect(cluster.element).toMatchObject({ parent: 'datacenter', technology: ['openshift'], node: { type: 'cluster', size: 'm5.2xlarge' } });
+    // Sin posición, queda dentro de su nodo (y el nodo crece si hace falta).
+    const got = (await mcp.call('get_view', { id: D })).json;
+    expect(got.view).toMatchObject({ level: 'deployment', environment: 'qa', scope: 'banking' });
+    const at = (id: string) => got.nodes.find((n: { id: string }) => n.id === id);
+    expect(at('ocp').x).toBeGreaterThan(at('datacenter').x);
+
+    const web = (await mcp.call('add_element', { kind: 'instance', of: 'web', parent: 'ocp', environments: ['qa'], view: D })).json;
+    expect(web.element).toMatchObject({ id: 'web-qa', name: 'Web', instance: { of: 'web' }, environments: ['qa'] });
+    const api = (await mcp.call('add_element', { kind: 'instance', of: 'API', replicas: 2, parent: 'ocp', environments: ['qa'], view: D })).json;
+    expect(api.element).toMatchObject({ id: 'api-qa', instance: { of: 'api', replicas: 2 } });
+    expect((await mcp.call('add_element', { kind: 'instance', name: 'Sin of' })).text).toContain('"of"');
+    expect((await mcp.call('add_element', { kind: 'instance', of: 'customer' })).text).toContain('container, store, bus o system');
+    const ingress = (await mcp.call('add_element', { kind: 'infra', name: 'Ingress', infraType: 'ingress', parent: 'ocp', addresses: ['app.example.com:443'], environments: ['qa'], view: D })).json;
+    expect(ingress.element).toMatchObject({ kind: 'infra', infra: { type: 'ingress' }, addresses: ['app.example.com:443'] });
+    expect((await mcp.call('add_element', { kind: 'container', name: 'X', addresses: ['1.2.3.4'] })).json.warnings.join(' ')).toContain('addresses');
+
+    await mcp.call('place', { view: D, elements: ['customer'] });
+    const rel = (await mcp.call('connect', { from: 'customer', to: 'ingress', protocols: ['HTTPS'], ports: [443] })).json;
+    expect(rel.relation).toMatchObject({ protocols: ['https'], ports: [443] });
+    expect((await mcp.call('connect', { from: 'ingress', to: 'web-qa', ports: [70000] })).text).toContain('65535');
+    await mcp.call('connect', { from: 'ingress', to: 'web-qa', protocols: ['https'] });
+
+    // La relación lógica web → api se proyecta sobre las instancias; customer → web ya tiene camino de red.
+    const edges = (await mcp.call('get_view', { id: D })).json.edges;
+    expect(edges.find((e: { from: string; to: string }) => e.from === 'web-qa' && e.to === 'api-qa')).toMatchObject({ projected: true, relations: ['web--api'] });
+    expect(edges.some((e: { from: string; to: string; projected?: boolean }) => e.from === 'customer' && e.to === 'web-qa')).toBe(false);
+
+    expect((await mcp.call('layout_view', { view: D })).json.moved).toBeGreaterThan(0);
+    expect((await mcp.call('layout_view', { view: D, fitFrames: true })).isError).toBe(false);
+    const nodes = (await modelOnDisk(dir)).views[D]!.nodes;
+    const inside = (c: string, p: string) => nodes[c]!.x > nodes[p]!.x && nodes[c]!.y > nodes[p]!.y;
+    expect(inside('ocp', 'datacenter') && inside('web-qa', 'ocp') && inside('api-qa', 'ocp')).toBe(true);
+
+    expect((await mcp.call('validate')).json.errors).toBe(0);
+    const analysis = (await mcp.call('analyze')).json;
+    expect(analysis.violations.map((v: { code: string; entity?: { id: string } }) => `${v.code}:${v.entity?.id}`)).toContain('not-deployed:db');
+    const dsl = (await mcp.call('export', { format: 'structurizr' })).text;
+    expect(dsl).toContain('deploymentEnvironment');
+
+    const model = await modelOnDisk(dir);
+    expect(model.workspace).toMatchObject({ code: 'ARQ-1024', version: 'v1.9', date: '2026-07-15' });
+    expect((await mcp.call('search_catalog', { catalog: 'infraTypes' })).json.map((t: { id: string }) => t.id)).toContain('load-balancer');
+    expect((await mcp.call('search_catalog', { catalog: 'technologies', query: 'route 53' })).json[0].id).toBe('route53');
   });
 });
 

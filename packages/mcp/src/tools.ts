@@ -7,7 +7,12 @@ import {
   ELEMENT_KINDS,
   EXPORT_FORMATS,
   GROUP_PROVIDER_CATALOG,
+  INFRA_TYPE_LABEL,
+  INFRA_TYPES,
   KIND_LABEL,
+  NODE_PROVIDER_CATALOG,
+  NODE_TYPE_LABEL,
+  NODE_TYPES,
   MESSAGE_BROKERS,
   OpError,
   PROTOCOLS,
@@ -18,7 +23,9 @@ import {
   ancestorsOf,
   childViewOf,
   childrenOf,
+  allViewEdges,
   createViewOp,
+  deploymentViewName,
   diffModels,
   ensureChildViewOp,
   exportModel,
@@ -29,7 +36,6 @@ import {
   searchCatalog,
   sortedValues,
   suggestProtocols,
-  viewEdges,
   viewsContaining,
   type CatalogItem,
   type CommentColor,
@@ -41,6 +47,7 @@ import {
   type Relation,
   type RelationPatch,
   type WorkspacePatch,
+  fitFramesOp,
 } from '@aegon/core';
 import {
   WorkspaceError,
@@ -375,17 +382,18 @@ export function registerTools(server: McpServer, session: Session): void {
       const view = ws.view(args.id);
       const placeable = placeableElements(m, view);
       return {
-        view: { id: view.id, name: view.name, level: view.level, scope: view.scope ?? null, description: view.description },
+        view: { id: view.id, name: view.name, level: view.level, scope: view.scope ?? null, ...(view.environment ? { environment: view.environment } : {}), description: view.description },
         nodes: Object.entries(view.nodes)
           .filter(([id]) => m.elements[id])
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([id, l]) => ({ ...brief(m.elements[id]!), x: l.x, y: l.y, ...(l.w ? { w: l.w } : {}), ...(l.h ? { h: l.h } : {}) })),
-        edges: viewEdges(m, view).map((e) => ({
+        edges: allViewEdges(m, view).map((e) => ({
           from: e.from,
           to: e.to,
           relations: e.relations.map((r) => r.id),
           label: e.relations.map((r) => r.label).filter(Boolean).join(' / ') || undefined,
           ...(e.implied ? { implied: true } : {}),
+          ...(e.projected ? { projected: true } : {}),
           ...(e.bidirectional ? { bidirectional: true } : {}),
         })),
         placeable: { total: placeable.length, elements: placeable.slice(0, 50).map((el) => ({ id: el.id, kind: el.kind, name: el.name })) },
@@ -398,9 +406,9 @@ export function registerTools(server: McpServer, session: Session): void {
     {
       title: 'Buscar en los catálogos',
       description:
-        'IDs válidos para technology (tecnologías), store.engine (motores de base de datos), bus.broker (brokers), protocols (protocolos) y group.provider. Con catalog=protocols y `target`, ordena los protocolos según el destino (JDBC hacia PostgreSQL, Kafka hacia un bus Kafka…).',
+        'IDs válidos para technology (tecnologías), store.engine (motores de base de datos), bus.broker (brokers), protocols (protocolos), group.provider (providers), node.provider (nodeProviders), node.type (nodeTypes) e infra.type (infraTypes). Con catalog=protocols y `target`, ordena los protocolos según el destino (JDBC hacia PostgreSQL, Kafka hacia un bus Kafka…).',
       inputSchema: z.object({
-        catalog: z.enum(['technologies', 'engines', 'brokers', 'protocols', 'providers', 'containerTypes']),
+        catalog: z.enum(['technologies', 'engines', 'brokers', 'protocols', 'providers', 'containerTypes', 'nodeProviders', 'nodeTypes', 'infraTypes']),
         query: z.string().optional().describe('Texto a buscar (nombre, ID o palabra clave)'),
         target: z.string().optional().describe('Solo protocols: elemento destino de la relación'),
         limit: z.number().int().positive().max(100).optional(),
@@ -425,6 +433,12 @@ export function registerTools(server: McpServer, session: Session): void {
         }
         case 'providers':
           return pick(GROUP_PROVIDER_CATALOG);
+        case 'nodeProviders':
+          return pick(NODE_PROVIDER_CATALOG);
+        case 'nodeTypes':
+          return NODE_TYPES.map((t) => ({ id: t, name: NODE_TYPE_LABEL[t] }));
+        case 'infraTypes':
+          return INFRA_TYPES.map((t) => ({ id: t, name: INFRA_TYPE_LABEL[t] }));
         default:
           return CONTAINER_TYPES.map((t) => ({ id: t, name: CONTAINER_TYPE_LABEL[t] }));
       }
@@ -486,22 +500,32 @@ export function registerTools(server: McpServer, session: Session): void {
         'Crea un elemento. Con `view` lo ubica en ese lienzo (en un lugar libre si no indicás x/y) y, en un lienzo L2/L3, hereda el padre (un container nuevo en el lienzo de contenedores de un sistema queda dentro de ese sistema). El ID se genera del nombre si no lo pasás.',
       inputSchema: z.object({
         kind,
-        name: z.string().min(1),
-        id: z.string().optional().describe('ID explícito (slug). Por defecto, el slug del nombre'),
-        parent: z.string().optional().describe('Padre: container → system, component → container, store → system o container, bus → system, group → group'),
+        name: z.string().min(1).optional().describe('Obligatorio, salvo en una instancia (toma el nombre de lo que despliega)'),
+        id: z.string().optional().describe('ID explícito (slug). Por defecto, el slug del nombre (en una instancia, <of>-<ambiente>)'),
+        parent: z.string().optional().describe('Padre: container → system, component → container, store → system o container, bus → system, group → group, node/infra/instance → node'),
         view: z.string().optional().describe('Lienzo donde ubicarlo'),
         x: z.number().optional(),
         y: z.number().optional(),
         description: z.string().optional().describe('Descripción corta (se ve en el nodo)'),
         docs: z.string().optional().describe('Documentación larga en Markdown'),
-        technology: z.array(z.string()).optional().describe('Solo system/container/component: IDs del catálogo (java, spring-boot, react, go, nodejs…)'),
+        technology: z.array(z.string()).optional().describe('system/container/component/node/infra: IDs del catálogo (java, spring-boot, react, openshift, fortigate, route53…)'),
         containerType: z.enum(CONTAINER_TYPES).optional(),
         role: z.string().optional().describe('Solo actor: rol o persona'),
         engine: z.string().optional().describe('Solo store: motor (postgresql, mysql, mongodb, redis, dynamodb, s3…)'),
         broker: z.string().optional().describe('Solo bus: broker (kafka, rabbitmq, sqs, sns, pubsub…)'),
         topics: z.array(z.string()).optional().describe('Solo bus: tópicos o colas'),
-        provider: z.string().optional().describe('Solo group: aws, gcp, azure, onprem, network, platform u other'),
-        region: z.string().optional().describe('Solo group'),
+        provider: z.string().optional().describe('group: aws, gcp, azure, onprem, network, platform u other · node: aws, azure, gcp, onprem, openshift, kubernetes, vmware…'),
+        region: z.string().optional().describe('Solo group y node'),
+        nodeType: z.enum(NODE_TYPES).optional().describe('Solo node: qué es (datacenter, cloud, network = VPC/VNet, cluster, namespace, server, vm…)'),
+        account: z.string().optional().describe('Solo node: cuenta, suscripción o proyecto'),
+        size: z.string().optional().describe('Solo node: tamaño o tipo de instancia (m5.2xlarge)'),
+        instances: z.number().int().positive().optional().describe('Solo node: cantidad de nodos iguales'),
+        infraType: z.enum(INFRA_TYPES).optional().describe('Solo infra: firewall, load-balancer, dns, gateway, ingress, egress, nat, vpn, link (enlace dedicado), security-group, waf, cdn, proxy, router'),
+        of: z.string().optional().describe('Solo instance: el container, store, bus o system que despliega (ID o nombre)'),
+        replicas: z.number().int().positive().optional().describe('Solo instance: réplicas'),
+        addresses: z.array(z.string()).optional().describe('node/infra/instance: IPs, CIDRs, hostnames o URLs'),
+        resource: z.string().optional().describe('node/infra/instance: ID del recurso en el proveedor (vpc-…, sg-…, i-…, ARN)'),
+        environments: z.array(z.string()).optional().describe('Ambientes donde existe (IDs del workspace). Sin el campo: en todos'),
         external: z.boolean().optional().describe('Elemento externo a la organización'),
         status: status.optional(),
         risk: risk.optional(),
@@ -511,8 +535,9 @@ export function registerTools(server: McpServer, session: Session): void {
       }),
       annotations: WRITE,
     },
-    write(async (ws, args: { kind: Element['kind']; name: string; x?: number; y?: number } & Record<string, unknown>) => {
+    write(async (ws, args: { kind: Element['kind']; name?: string; x?: number; y?: number } & Record<string, unknown>) => {
       if ((args.x === undefined) !== (args.y === undefined)) throw new WorkspaceError('invalid-position', 'Indicá x e y juntos');
+      if (!args.name && args.kind !== 'instance') throw new WorkspaceError('invalid-name', 'Falta el nombre');
       const { x, y, ...rest } = args;
       const plan = planAddElement(ws.model, { ...(rest as Parameters<typeof planAddElement>[1]), at: x !== undefined && y !== undefined ? { x, y } : undefined });
       const where = plan.view ? `, ubicado en ${plan.view} (${plan.position!.x}, ${plan.position!.y})` : '';
@@ -572,13 +597,14 @@ export function registerTools(server: McpServer, session: Session): void {
         to: ref('elemento destino'),
         label: z.string().optional().describe('Qué hace: "Lee y escribe", "Publica pagos"'),
         description: z.string().optional(),
-        protocols: z.array(z.string()).optional().describe('IDs del catálogo: https, rest, grpc, graphql, kafka, amqp, jdbc, sql, resp, s3-api, sftp, oidc…'),
+        protocols: z.array(z.string()).optional().describe('IDs del catálogo: https, rest, grpc, graphql, kafka, amqp, jdbc, sql, tds, resp, s3-api, sftp, oidc, tcp, bgp…'),
+        ports: z.array(z.number().int().min(1).max(65535)).optional().describe('Puertos de destino: [443], [8080], [443, 80]'),
         bidirectional: z.boolean().optional(),
         status: status.optional(),
       }),
       annotations: WRITE,
     },
-    write(async (ws, args: { from: string; to: string; label?: string; description?: string; protocols?: string[]; bidirectional?: boolean; status?: Relation['status'] }) => {
+    write(async (ws, args: { from: string; to: string; label?: string; description?: string; protocols?: string[]; ports?: number[]; bidirectional?: boolean; status?: Relation['status'] }) => {
       const plan = planConnect(ws.model, { ...args, direction: args.bidirectional ? 'bidirectional' : undefined });
       const names = `${ws.model.elements[plan.from]!.name} → ${ws.model.elements[plan.to]!.name}`;
       const text = { created: 'Relación creada', bidirectional: 'Relación ahora bidireccional', updated: 'Relación actualizada', exists: 'Ya estaban conectados, sin cambios' }[plan.result];
@@ -592,7 +618,7 @@ export function registerTools(server: McpServer, session: Session): void {
     'update_relation',
     {
       title: 'Modificar relación',
-      description: 'Cambia campos de una relación (label, description, protocols, direction, status, tags, from, to). null borra el campo.',
+      description: 'Cambia campos de una relación (label, description, protocols, ports, direction, status, tags, from, to). null borra el campo.',
       inputSchema: z.object({ id: z.string().min(1), patch: patch.describe('Campos a cambiar (null = borrar)') }),
       annotations: WRITE,
     },
@@ -621,15 +647,33 @@ export function registerTools(server: McpServer, session: Session): void {
   server.registerTool(
     'create_view',
     {
-      title: 'Crear lienzo L1',
-      description: 'Crea un lienzo de contexto (nivel 1) vacío. Para L2/L3 usá create_child_view.',
-      inputSchema: z.object({ name: z.string().min(1), description: z.string().optional() }),
+      title: 'Crear lienzo (contexto o despliegue)',
+      description:
+        'Crea un lienzo vacío: de contexto (nivel 1, por defecto) o de despliegue de un ambiente (`level: deployment` + `environment`, opcionalmente del sistema `scope`). Para L2/L3 usá create_child_view.',
+      inputSchema: z.object({
+        name: z.string().min(1).optional().describe('Por defecto, en despliegue: "<sistema> · Despliegue <ambiente>"'),
+        level: z.enum(['1', 'deployment']).optional().describe('1 (contexto) o deployment'),
+        environment: z.string().optional().describe('Solo despliegue: ID del ambiente (definilo antes con update_workspace)'),
+        scope: z.string().optional().describe('Solo despliegue: sistema cuyo despliegue se muestra'),
+        description: z.string().optional(),
+      }),
       annotations: WRITE,
     },
-    write(async (ws, args: { name: string; description?: string }) => {
-      const { op, id } = createViewOp(ws.model, args.name, 1);
+    write(async (ws, args: { name?: string; level?: '1' | 'deployment'; environment?: string; scope?: string; description?: string }) => {
+      const deployment = args.level === 'deployment';
+      if (deployment && !args.environment) throw new WorkspaceError('invalid-field', 'Un lienzo de despliegue necesita `environment`');
+      if (deployment && !(ws.model.workspace.environments ?? []).some((e) => e.id === args.environment)) {
+        throw new WorkspaceError('invalid-field', `El ambiente "${args.environment}" no está definido: agregalo con update_workspace (environments)`);
+      }
+      if (!deployment && (args.environment || args.scope)) throw new WorkspaceError('invalid-field', '`environment` y `scope` solo aplican a un lienzo de despliegue');
+      const scope = args.scope ? ws.element(args.scope) : undefined;
+      if (scope && scope.kind !== 'system') throw new WorkspaceError('invalid-scope', `Un lienzo de despliegue muestra un sistema; "${scope.name}" es un ${scope.kind}`);
+      const name = args.name ?? (deployment ? deploymentViewName(ws.model, args.environment!, scope?.id) : undefined);
+      if (!name) throw new WorkspaceError('invalid-name', 'Falta el nombre del lienzo');
+      const { op, id } = createViewOp(ws.model, name, deployment ? 'deployment' : 1, scope?.id, args.environment);
+      args = { ...args, name };
       const final: Op = args.description && op.type === 'view.add' ? { ...op, view: { ...op.view, description: args.description } } : op;
-      return apply(ws, final, `Lienzo "${args.name}" creado (${id})`, { id });
+      return apply(ws, final, `Lienzo "${name}" creado (${id})`, { id });
     }),
   );
 
@@ -656,15 +700,21 @@ export function registerTools(server: McpServer, session: Session): void {
     'update_view',
     {
       title: 'Modificar lienzo',
-      description: 'Cambia el nombre o la descripción de un lienzo.',
-      inputSchema: z.object({ id: ref('lienzo'), name: z.string().min(1).optional(), description: z.string().nullable().optional() }),
+      description: 'Cambia el nombre, la descripción o (en despliegue) el ambiente de un lienzo.',
+      inputSchema: z.object({
+        id: ref('lienzo'),
+        name: z.string().min(1).optional(),
+        description: z.string().nullable().optional(),
+        environment: z.string().optional().describe('Solo despliegue: ID del ambiente'),
+      }),
       annotations: WRITE,
     },
-    write(async (ws, args: { id: string; name?: string; description?: string | null }) => {
+    write(async (ws, args: { id: string; name?: string; description?: string | null; environment?: string }) => {
       const view = ws.view(args.id);
       const p: Record<string, unknown> = {};
       if (args.name !== undefined) p.name = args.name;
       if (args.description !== undefined) p.description = args.description;
+      if (args.environment !== undefined) p.environment = args.environment;
       return apply(ws, { type: 'view.update', id: view.id, patch: p }, `Lienzo ${view.id} actualizado`, { id: view.id });
     }),
   );
@@ -722,12 +772,23 @@ export function registerTools(server: McpServer, session: Session): void {
     'layout_view',
     {
       title: 'Ordenar lienzo',
-      description: 'Ordena automáticamente un lienzo (por capas siguiendo las relaciones, como Shift+L en la app). Con `elements` ordena solo esos.',
-      inputSchema: z.object({ view: ref('lienzo'), elements: z.array(z.string()).optional() }),
+      description:
+        'Ordena automáticamente un lienzo (por capas siguiendo las relaciones, como Shift+L en la app; los nodos de despliegue y grupos envuelven a lo que contienen). Con `elements` ordena solo esos. Con `fitFrames` no mueve nada: solo ajusta cada marco (nodo o grupo) a su contenido.',
+      inputSchema: z.object({
+        view: ref('lienzo'),
+        elements: z.array(z.string()).optional(),
+        fitFrames: z.boolean().optional().describe('Solo ajustar los marcos a su contenido'),
+      }),
       annotations: WRITE,
     },
-    write(async (ws, args: { view: string; elements?: string[] }) => {
-      const plan = planLayout(ws.model, args.view, args.elements);
+    write(async (ws, args: { view: string; elements?: string[]; fitFrames?: boolean }) => {
+      if (args.fitFrames) {
+        const view = ws.view(args.view);
+        const op = fitFramesOp(ws.model, view.id);
+        if (!op) return { ok: true, summary: `Los marcos de ${view.id} ya envuelven a su contenido`, written: [], deleted: [] };
+        return apply(ws, op, `Marcos de ${view.id} ajustados a su contenido`, { view: view.id });
+      }
+      const plan = await planLayout(ws.model, args.view, args.elements);
       if (!plan.op) return { ok: true, summary: `El lienzo ${plan.view} ya está ordenado`, moved: 0, written: [], deleted: [] };
       return apply(ws, plan.op, `Lienzo ${plan.view} ordenado (${plan.moved} nodos movidos)`, { view: plan.view, moved: plan.moved });
     }),
@@ -978,17 +1039,27 @@ export function registerTools(server: McpServer, session: Session): void {
     'update_workspace',
     {
       title: 'Modificar workspace',
-      description: 'Cambia nombre, descripción, organización, arquitecto o lienzo por defecto del workspace. null borra el campo.',
+      description:
+        'Cambia los datos del workspace (y del documento que se exporta: código, versión, fecha, arquitecto, organización), los ambientes o el lienzo por defecto. null borra el campo.',
       inputSchema: z.object({
         name: z.string().min(1).optional(),
         description: z.string().nullable().optional(),
-        organization: z.string().nullable().optional(),
-        architect: z.string().nullable().optional(),
+        organization: z.string().nullable().optional().describe('Unidad u organización responsable'),
+        architect: z.string().nullable().optional().describe('Autor o arquitecto'),
+        code: z.string().nullable().optional().describe('Código del documento o del cambio (ARQ-1024, un ticket)'),
+        version: z.string().nullable().optional().describe('Versión del documento (v1.9)'),
+        date: z.string().nullable().optional().describe('Fecha de la versión (AAAA-MM-DD)'),
+        environments: z
+          .array(z.object({ id: z.string().min(1), name: z.string().min(1) }))
+          .nullable()
+          .optional()
+          .describe('Ambientes en orden: [{"id": "qa", "name": "QA"}, {"id": "prod", "name": "Producción"}]. Reemplaza la lista'),
         defaultView: z.string().nullable().optional(),
       }),
       annotations: WRITE,
     },
-    write(async (ws, args: Record<string, string | null | undefined>) => {
+    write(async (ws, args: Record<string, unknown>) => {
+      if (typeof args.date === 'string' && !/^\d{4}-\d{2}-\d{2}$/.test(args.date)) throw new WorkspaceError('invalid-field', 'La fecha va como AAAA-MM-DD');
       const p: WorkspacePatch = {};
       for (const [key, value] of Object.entries(args)) if (value !== undefined) (p as Record<string, unknown>)[key] = value;
       if (typeof p.defaultView === 'string') p.defaultView = ws.view(p.defaultView).id;

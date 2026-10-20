@@ -97,6 +97,36 @@ pub fn write_many(root: &str, writes: Vec<(String, String)>, deletes: Vec<String
     Ok(())
 }
 
+/// Decodifica base64 estándar (con o sin relleno `=`).
+pub fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
+    fn value(c: u8) -> Option<u32> {
+        match c {
+            b'A'..=b'Z' => Some((c - b'A') as u32),
+            b'a'..=b'z' => Some((c - b'a') as u32 + 26),
+            b'0'..=b'9' => Some((c - b'0') as u32 + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let bytes: Vec<u8> = input.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').collect();
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    for chunk in bytes.chunks(4) {
+        let mut acc = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            acc |= value(*c).ok_or("base64 inválido")? << (18 - 6 * i);
+        }
+        out.push((acc >> 16) as u8);
+        if chunk.len() > 2 {
+            out.push((acc >> 8) as u8);
+        }
+        if chunk.len() > 3 {
+            out.push(acc as u8);
+        }
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Serialize)]
 pub struct GitOutput {
     pub code: i32,
@@ -140,6 +170,17 @@ pub fn git(cwd: &str, args: &[String], input: Option<&str>) -> Result<GitOutput,
 }
 
 // --- Comandos ----------------------------------------------------------------------------------
+
+/// Guarda un archivo exportado (imagen, PDF) en la ruta que eligió el usuario en el diálogo.
+#[tauri::command]
+async fn save_file(path: String, base64: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = decode_base64(&base64)?;
+        std::fs::write(&path, bytes).map_err(|e| format!("{path}: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
 #[tauri::command]
 fn fs_list(root: String) -> Vec<String> {
@@ -236,6 +277,7 @@ pub fn run() {
             fs_read,
             fs_read_all,
             fs_write_many,
+            save_file,
             git_run,
             watch_start,
             watch_stop
@@ -253,6 +295,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn decodifica_base64() {
+        assert_eq!(decode_base64("").unwrap(), Vec::<u8>::new());
+        assert_eq!(decode_base64("QQ==").unwrap(), b"A");
+        assert_eq!(decode_base64("QUI=").unwrap(), b"AB");
+        assert_eq!(decode_base64("QUJD").unwrap(), b"ABC");
+        assert_eq!(decode_base64("iVBORw0KGgo=").unwrap(), [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+        assert!(decode_base64("a$b=").is_err());
     }
 
     #[test]

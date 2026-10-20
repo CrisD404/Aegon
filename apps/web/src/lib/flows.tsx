@@ -11,8 +11,13 @@ import {
   templateFromWorkspace,
   type FinOpsSettingsDraft,
   type Template,
+  createViewOp,
+  type Id,
+  type Op,
 } from '@aegon/core';
 import { FinOpsSettingsDialog } from '../panels/FinOpsSettings.tsx';
+import { saveBlob } from '../export/save.ts';
+import { DocumentDialog, NewDeploymentDialog, type DocumentDraft, type NewDeploymentDraft } from '../panels/DocumentDialogs.tsx';
 import { confirmDialog, promptDialog, showDialog } from '../store/dialogs.ts';
 import { newTemplateId, useTemplates } from '../store/templates.ts';
 import { useUi } from '../store/ui.ts';
@@ -256,11 +261,55 @@ export function exportCostsCsv() {
   const model = useWorkspace.getState().model;
   // BOM: Excel lo abre con acentos correctos.
   const blob = new Blob(['\uFEFF', costsCsv(model)], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${model.workspace.id}-costos.csv`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-  ui().toast('CSV de costos descargado', 'success');
+  void saveBlob(blob, `${model.workspace.id}-costos.csv`).then((ok) => ok && ui().toast('CSV de costos guardado', 'success'));
+}
+
+// -----------------------------------------------------------------------------------------------
+// Documento y despliegue
+
+/** Datos del documento (nombre, código, versión, fecha, autor, unidad). */
+export async function openDocumentSettings() {
+  const model = useWorkspace.getState().model;
+  const draft = await showDialog<DocumentDraft | null>((close) => <DocumentDialog model={model} close={close} />, null);
+  if (!draft) return;
+  const ws = useWorkspace.getState().model.workspace;
+  const patch: Record<string, string | null> = {};
+  for (const [key, value] of Object.entries(draft) as [keyof DocumentDraft, string | undefined][]) {
+    const next = value?.trim() ? value.trim() : null;
+    if ((ws[key] ?? null) !== next) patch[key] = next;
+  }
+  if (patch.name === null) delete patch.name;
+  if (!Object.keys(patch).length) return;
+  if (useWorkspace.getState().dispatch({ type: 'workspace.update', patch }, { label: 'Datos del documento' })) {
+    useUi.getState().toast('Datos del documento actualizados', 'success');
+  }
+}
+
+/** Crea un lienzo de despliegue (y el ambiente, si se agregó en el diálogo) y lo abre. */
+export async function openNewDeploymentView(scope?: Id) {
+  const model = useWorkspace.getState().model;
+  // Sin sistema explícito: el seleccionado, o el del lienzo actual (L2 abre un sistema; L3, un contenedor de uno).
+  if (!scope) {
+    const ui = useUi.getState();
+    const selected = ui.selection.nodes.length === 1 ? model.elements[ui.selection.nodes[0]!] : undefined;
+    const view = ui.activeViewId ? model.views[ui.activeViewId] : undefined;
+    const viewScope = view?.scope ? model.elements[view.scope] : undefined;
+    const candidate = selected?.kind === 'system' ? selected : viewScope?.kind === 'system' ? viewScope : viewScope?.parent ? model.elements[viewScope.parent] : undefined;
+    if (candidate?.kind === 'system' && candidate.scope !== 'external') scope = candidate.id;
+  }
+  const draft = await showDialog<NewDeploymentDraft | null>((close) => <NewDeploymentDialog model={model} scope={scope} close={close} />, null);
+  if (!draft) return;
+  const current = useWorkspace.getState().model;
+  const ops: Op[] = [];
+  if (draft.newEnvironment) ops.push({ type: 'workspace.update', patch: { environments: [...environmentsOf(current), draft.newEnvironment] } });
+  const { op, id } = createViewOp(current, draft.name, 'deployment', draft.scope, draft.environment);
+  ops.push(op);
+  if (useWorkspace.getState().dispatch({ type: 'batch', ops, label: `Crear ${draft.name}` })) useUi.getState().openView(id, { transition: 'fade' });
+}
+
+/** Exportar el lienzo activo a PNG o PDF (con cartel y leyenda). */
+export async function openExportDialog() {
+  if (!useUi.getState().activeViewId) return;
+  const { ExportDialog } = await import('../export/ExportDialog.tsx');
+  await showDialog<void>((close) => <ExportDialog close={() => close(undefined)} />, undefined);
 }

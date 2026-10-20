@@ -106,6 +106,27 @@ const GLYPHS = {
     </>
   ),
   cloud: <path d="M7.25 18.75h10a4.25 4.25 0 0 0 .5-8.47A5.75 5.75 0 0 0 6.6 9.9a4.43 4.43 0 0 0 .65 8.85z" />,
+  // Despliegue: nodo (caja que aloja otra), infraestructura (escudo de red) e instancia
+  // (contenedor con un punto: "una copia corriendo").
+  node: (
+    <>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+      <path d="M3.5 8h17" />
+      <rect x="7" y="11" width="10" height="6.25" rx="1.5" />
+    </>
+  ),
+  infra: (
+    <>
+      <path d="M12 3.25l7.25 2.75v5.5c0 4.5-3 7.75-7.25 9.25-4.25-1.5-7.25-4.75-7.25-9.25V6z" />
+      <path d="M8.5 12h7M12 8.5v7" />
+    </>
+  ),
+  instance: (
+    <>
+      <path d="M12 3.5l7.75 4.25v8.5L12 20.5l-7.75-4.25v-8.5z" />
+      <circle cx="12" cy="12" r="2.25" />
+    </>
+  ),
 } as const satisfies Record<string, ReactNode>;
 
 export type GlyphName = keyof typeof GLYPHS;

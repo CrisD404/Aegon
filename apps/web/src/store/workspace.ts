@@ -16,6 +16,7 @@ import {
   type Model,
   type Op,
   type Template,
+  levelRank,
 } from '@aegon/core';
 import { isAegonWorkspace, planWrite } from '@aegon/format-yaml';
 import {
@@ -37,6 +38,7 @@ import {
   type WorkspaceRecord,
 } from '../lib/persist.ts';
 import { parseFiles, serializeModel } from '../lib/yaml.ts';
+import { DevFolderStorage } from '../lib/dev-folder.ts';
 import { useUi } from './ui.ts';
 
 type HistoryEntry =
@@ -240,7 +242,7 @@ function describeOp(op: Op): string {
 
 export function defaultViewOf(model: Model): string | null {
   if (model.workspace.defaultView && model.views[model.workspace.defaultView]) return model.workspace.defaultView;
-  const views = Object.values(model.views).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+  const views = Object.values(model.views).sort((a, b) => levelRank(a.level) - levelRank(b.level) || a.name.localeCompare(b.name));
   return views[0]?.id ?? null;
 }
 
@@ -319,6 +321,9 @@ export async function openRecord(record: WorkspaceRecord, opts: { requestPermiss
       if (!isDesktop() || !record.path) throw new Error('Este workspace se abre desde la app de escritorio');
       storage = new TauriStorage(record.path);
       git = await desktopGit(record.path, storage);
+    } else if (record.source === 'dev') {
+      if (!import.meta.env.DEV || !record.path) throw new Error('Este workspace se abre con el servidor de desarrollo');
+      storage = new DevFolderStorage(record.path);
     } else if (record.source === 'github') {
       const token = await persist.getToken(record.key);
       if (!record.github || !token) throw new Error('Falta el token de GitHub de este workspace: volvé a conectarlo');
@@ -623,4 +628,20 @@ async function linkToFolderDesktop(): Promise<void> {
   // El borrador viaja con el workspace (misma clave).
   await activate(record, storage, await readAll(storage), await desktopGit(path, storage));
   useUi.getState().toast(`Vinculado a ${path}`, 'success');
+}
+
+/**
+ * Solo desarrollo: abre una carpeta del disco a través del servidor de Vite (`?dev-folder=<ruta>`).
+ * La carpeta manda: se descarta el borrador local para ver exactamente lo que hay en disco.
+ */
+export async function openDevFolder(path: string): Promise<void> {
+  useWorkspace.setState({ status: 'loading', error: null });
+  const storage = new DevFolderStorage(path);
+  const files = await readAll(storage);
+  if (!isAegonWorkspace(files)) throw new Error(`${path} no tiene aegon.yaml`);
+  const recents = await persist.listWorkspaces();
+  const existing = recents.find((r) => r.source === 'dev' && r.path === path);
+  const record: WorkspaceRecord = existing ?? { key: newKey(), name: storage.label, source: 'dev', path, folderName: storage.label, openedAt: Date.now() };
+  await persist.clearDraft(record.key);
+  await activate(record, storage, files);
 }

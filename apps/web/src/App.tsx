@@ -16,7 +16,7 @@ import { newWorkspaceFlow } from './lib/flows.tsx';
 import './store/sync.ts';
 import { TopBar, Logo } from './panels/TopBar.tsx';
 import { useUi, type RightTab } from './store/ui.ts';
-import { createDemoWorkspace, defaultViewOf, openFolder, openRecord, useWorkspace } from './store/workspace.ts';
+import { createDemoWorkspace, defaultViewOf, openFolder, openDevFolder, openRecord, useWorkspace } from './store/workspace.ts';
 import { lastWorkspaceKey, persist } from './lib/persist.ts';
 import { useShortcuts } from './lib/shortcuts.ts';
 import { Button, cn } from './ui/primitives.tsx';
@@ -28,6 +28,15 @@ async function boot() {
   void useTemplates.getState().load();
   const records = await persist.listWorkspaces();
   useWorkspace.setState({ recents: records });
+  const devFolder = import.meta.env.DEV ? new URLSearchParams(location.search).get('dev-folder') : null;
+  if (devFolder) {
+    try {
+      await openDevFolder(devFolder);
+      return;
+    } catch (error) {
+      useUi.getState().toast(`No se pudo abrir ${devFolder}: ${(error as Error).message}`, 'error');
+    }
+  }
   const last = lastWorkspaceKey();
   const ordered = [...records].sort((a, b) => (a.key === last ? -1 : b.key === last ? 1 : 0));
   // Si el último no abre (carpeta movida o borrada, token vencido) se prueba con el siguiente.
