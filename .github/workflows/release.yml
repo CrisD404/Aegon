@@ -1,0 +1,167 @@
+# Con cada push a main: tests, instaladores para Windows, macOS y Linux, y un Release con el
+# changelog (commits desde el release anterior) y los instaladores como assets.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Los releases salen en orden: uno a la vez, sin cancelar el que está en curso.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Versión y changelog
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: version
+        name: Versión (mayor.menor de tauri.conf.json + número de corrida)
+        run: |
+          base=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version.split('.').slice(0, 2).join('.')")
+          echo "version=$base.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - name: Changelog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          {
+            echo "## Cambios"
+            echo
+            git log --no-merges --format="- %s ([%h]($REPO_URL/commit/%H))" ${prev:+$prev..}HEAD
+            echo
+            if [ -n "$prev" ]; then echo "Todos los cambios: $REPO_URL/compare/$prev...v$VERSION"; echo; fi
+            cat .github/release-notes.md
+          } > notes.md
+          cat notes.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notes
+          path: notes.md
+
+  test:
+    name: Typecheck y tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  build:
+    name: App ${{ matrix.name }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+          - name: macos
+            os: macos-latest
+            # Un solo instalador para Apple Silicon e Intel.
+            args: --target universal-apple-darwin
+          - name: linux
+            # La versión de glibc más vieja disponible: el AppImage y el .deb corren en más distros.
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Dependencias de sistema (WebKitGTK)
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Targets de Rust para macOS universal
+        if: matrix.name == 'macos'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Versión de la app
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const f = 'apps/desktop/src-tauri/tauri.conf.json';
+            const conf = JSON.parse(fs.readFileSync(f, 'utf8'));
+            conf.version = process.env.VERSION;
+            fs.writeFileSync(f, JSON.stringify(conf, null, 2) + '\n');
+          "
+      - name: Compilar e instaladores
+        run: pnpm --filter @aegon/desktop exec tauri build ${{ matrix.args }}
+      - name: Juntar los archivos
+        shell: bash
+        run: |
+          mkdir -p out
+          target=apps/desktop/src-tauri/target
+          case "${{ matrix.name }}" in
+            windows)
+              bundle=$target/release/bundle
+              cp $bundle/msi/*.msi $bundle/nsis/*-setup.exe out/
+              # Portable: el ejecutable solo (requiere WebView2, que ya viene con Windows 10 y 11).
+              cp $target/release/aegon.exe "out/Aegon_${VERSION}_x64_portable.exe"
+              cp $target/release/aegon.exe Aegon.exe
+              7z a -tzip "out/Aegon_${VERSION}_x64_portable.zip" Aegon.exe
+              ;;
+            macos)
+              bundle=$target/universal-apple-darwin/release/bundle
+              cp $bundle/dmg/*.dmg out/
+              tar -czf "out/Aegon_${VERSION}_universal.app.tar.gz" -C $bundle/macos Aegon.app
+              ;;
+            linux)
+              bundle=$target/release/bundle
+              cp $bundle/deb/*.deb $bundle/rpm/*.rpm $bundle/appimage/*.AppImage out/
+              ;;
+          esac
+          ls -la out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Publicar el release
+    needs: [prepare, test, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Crear el release con el changelog y los instaladores
+        run: |
+          mv dist/notes.md notes.md
+          gh release create "v$VERSION" dist/* \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Aegon v$VERSION" \
+            --notes-file notes.md

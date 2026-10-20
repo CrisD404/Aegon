@@ -6,6 +6,18 @@ inicio para trabajar con agentes de IA.
 
 Toma como base a IcePanel, suma la flexibilidad de Enterprise Architect y la soltura de draw.io.
 
+## Probar y descargar
+
+- **En el navegador, sin instalar nada:** <https://crisd404.github.io/Aegon/>. Arranca con un
+  workspace de ejemplo (banca digital); lo que hagas queda en tu navegador.
+- **App de escritorio:** el [último release](https://github.com/CrisD404/Aegon/releases/latest)
+  trae instaladores para Windows (MSI, instalador `.exe` y versión portable), macOS (DMG universal,
+  Apple Silicon e Intel) y Linux (AppImage, `.deb` y `.rpm`). No están firmados: las notas de cada
+  release explican cómo abrirlos la primera vez.
+
+Cada push a `main` publica la web y un release nuevo (`v0.1.<n>`) con el changelog: ver
+[`.github/workflows`](.github/workflows).
+
 ## Estado
 
 **Fase 0 · Fundaciones**, **Fase 1 · Lienzo MVP**, **Fase 2 · Escritorio + Git**,
