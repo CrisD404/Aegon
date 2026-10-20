@@ -85,6 +85,17 @@ const BOUNDARY_OPTIONS: ElkLayoutOptions = {
 };
 const BOUNDARY_ID = '__boundary';
 
+/**
+ * Despliegue: de izquierda a derecha (personas → infraestructura → instancias), como se leen los
+ * caminos de red. El lienzo dibuja cada flecha directa entre sus nodos, con la etiqueta en el medio,
+ * y no por donde la lleva ELK: con más aire entre flechas y nodos, las que saltan varias capas pasan
+ * lejos de los nodos del camino y su etiqueta no cae encima de uno.
+ */
+const DEPLOYMENT_OPTIONS: ElkLayoutOptions = {
+  'elk.direction': 'RIGHT',
+  'elk.spacing.edgeNode': '60',
+};
+
 /** Texto de la etiqueta de una flecha, igual que en el lienzo: qué hace y, abajo, protocolo y puertos. */
 export function edgeLabelParts(edge: Pick<ViewEdge, 'relations' | 'implied' | 'projected'>): {
   label?: string;
@@ -186,12 +197,14 @@ export function buildElkGraph(model: Model, view: View, ids?: readonly Id[]): El
   };
   for (const id of leaves) elkNodes.set(id, leafNode(id));
 
-  // Despliegue: de izquierda a derecha (personas → infraestructura → instancias), como se leen los
-  // caminos de red; los niveles C4, de arriba hacia abajo.
-  const options =
-    view.level === 'deployment' ? { ...ROOT_OPTIONS, 'elk.direction': 'RIGHT' } : ROOT_OPTIONS;
-  const root: ElkGraphNode = { id: '__root', layoutOptions: options, children: [], edges: [] };
+  // Los niveles C4, de arriba hacia abajo; el despliegue, de izquierda a derecha.
+  const deployment = view.level === 'deployment';
+  const options = deployment ? { ...ROOT_OPTIONS, ...DEPLOYMENT_OPTIONS } : ROOT_OPTIONS;
+  const frameOptions = deployment ? { ...GROUP_OPTIONS, ...DEPLOYMENT_OPTIONS } : GROUP_OPTIONS;
+  const root: ElkGraphNode = { id: '__root', layoutOptions: { ...options }, children: [], edges: [] };
   const targets = new Set<Id>(leaves);
+  // Niveles que se empaquetan en vez de ordenarse enteros: la raíz y los marcos que se atraviesan.
+  const packed = new Set<ElkGraphNode>();
   if (selection) {
     root.children = leaves.sort(byPosition).map((id) => elkNodes.get(id)!);
   } else {
@@ -212,11 +225,37 @@ export function buildElkGraph(model: Model, view: View, ids?: readonly Id[]): El
       }
       return {
         id,
-        layoutOptions: { ...GROUP_OPTIONS, 'elk.direction': options['elk.direction']! },
+        layoutOptions: { ...frameOptions, 'elk.direction': options['elk.direction']! },
         children: children.map(build),
       };
     };
     const top = (childrenOf.get('__root') ?? []).sort(byPosition).map(build);
+    // Despliegue con dos o más marcos de primer nivel (datacenter, nube…): cada uno es una franja que
+    // se ordena entera y la raíz las apila, empaquetadas con lo suelto hacia 16:10, en vez de
+    // encadenarlas en una sola tira larga que al encuadrar queda ilegible. Si todo va dentro de un
+    // único marco (AWS, el datacenter…), se baja por los marcos únicos hasta el primer nivel con dos
+    // o más: esos son las franjas y los marcos atravesados las empaquetan como la raíz.
+    if (deployment) {
+      const through: ElkGraphNode[] = [];
+      let frames = top.filter((n) => n.children);
+      while (frames.length === 1) {
+        through.push(frames[0]!);
+        frames = frames[0]!.children!.filter((n) => n.children);
+      }
+      if (frames.length > 1) {
+        root.layoutOptions!['elk.hierarchyHandling'] = 'SEPARATE_CHILDREN';
+        packed.add(root);
+        for (const frame of through) {
+          frame.layoutOptions = {
+            ...options,
+            ...frame.layoutOptions,
+            'elk.hierarchyHandling': 'SEPARATE_CHILDREN',
+          };
+          packed.add(frame);
+        }
+        for (const frame of frames) frame.layoutOptions!['elk.hierarchyHandling'] = 'INCLUDE_CHILDREN';
+      }
+    }
     // L2/L3: lo del elemento abierto va dentro de su límite; lo externo queda afuera y no lo tapa.
     const inside =
       view.scope && view.level !== 'deployment' ? new Set(descendantsOf(model, view.scope)) : null;
@@ -267,6 +306,8 @@ export function buildElkGraph(model: Model, view: View, ids?: readonly Id[]): El
     // ELK ignora las etiquetas sin texto: el texto va aunque solo cuente el tamaño.
     const { label: text, tech } = edgeLabelParts(edge);
     const owner = container(a, b);
+    // Entre franjas o de una franja hacia afuera: ELK no las usa para apilar (las traza el lienzo).
+    if (packed.has(owner) && (parentOf.get(a) !== owner || parentOf.get(b) !== owner)) continue;
     owner.edges = [
       ...(owner.edges ?? []),
       {
