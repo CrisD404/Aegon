@@ -1,8 +1,7 @@
 import { memo } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
-import { NODE_TYPE_LABEL, findTechnology } from '@aegon/core';
 import { TechIcon } from '@aegon/icons';
-import type { DeploymentFlowNode } from '../derive.ts';
+import { deploymentCaption, type DeploymentFlowNode } from '../derive.ts';
 import { CostBadge } from './ElementNode.tsx';
 import { NODE_TYPE_ICON, nodeProvider, providerTone } from './deployment-icons.tsx';
 
@@ -22,9 +21,7 @@ function DeploymentNodeImpl({ data, selected }: NodeProps<DeploymentFlowNode>) {
   const el = data.element;
   const Icon = NODE_TYPE_ICON[el.node.type];
   const provider = nodeProvider(el.node.provider);
-  const technology = (el.technology ?? []).map((t) => findTechnology(t)?.name ?? t);
-  const caption = [NODE_TYPE_LABEL[el.node.type], ...technology, el.node.size, el.node.region].filter(Boolean).join(' · ');
-  const ids = [el.resource, ...(el.addresses ?? []), el.node.account].filter(Boolean).join(' · ');
+  const { caption, ids } = deploymentCaption(el);
   return (
     <div
       className="c4-deploy"

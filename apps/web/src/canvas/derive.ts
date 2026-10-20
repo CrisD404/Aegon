@@ -4,9 +4,11 @@ import {
   childViewOf,
   descendantsOf,
   edgeLabelSize,
+  findTechnology,
   indexOf,
   isFrameKind,
   isNetworkRelation,
+  NODE_TYPE_LABEL,
   projectedEdges,
   representativeInView,
   sizeOf,
@@ -230,17 +232,15 @@ export function absoluteRects(
   return out;
 }
 
-/** Marco del elemento abierto (L2/L3) que envuelve a sus hijos ubicados. */
-export function deriveBoundary(
-  model: Model,
-  view: View,
-  nodes: readonly Node[],
-): BoundaryFlowNode | null {
+/** Elemento abierto (L2/L3) que el lienzo dibuja como marco alrededor de sus hijos. */
+function boundaryScope(model: Model, view: View): Element | null {
   if (!view.scope || view.level === 'deployment') return null;
-  const scope = model.elements[view.scope];
-  if (!scope) return null;
-  const inside = new Set(descendantsOf(model, view.scope));
-  const rects = absoluteRects(nodes.filter((n) => n.type !== 'boundary'));
+  return model.elements[view.scope] ?? null;
+}
+
+/** Rectángulo del marco del elemento abierto: los hijos ubicados, con margen y lugar para el título. */
+function boundaryBox(model: Model, scope: Id, rects: ReadonlyMap<string, Rect>): Rect {
+  const inside = new Set(descendantsOf(model, scope));
   let x1 = Infinity;
   let y1 = Infinity;
   let x2 = -Infinity;
@@ -260,17 +260,36 @@ export function deriveBoundary(
     x2 = 560;
     y2 = 320;
   }
-  const width = Math.max(x2 - x1 + pad * 2, 320);
-  const height = Math.max(y2 - y1 + top + pad, 200);
+  return {
+    x: x1 - pad,
+    y: y1 - top,
+    w: Math.max(x2 - x1 + pad * 2, 320),
+    h: Math.max(y2 - y1 + top + pad, 200),
+  };
+}
+
+/** Marco del elemento abierto (L2/L3) que envuelve a sus hijos ubicados. */
+export function deriveBoundary(
+  model: Model,
+  view: View,
+  nodes: readonly Node[],
+): BoundaryFlowNode | null {
+  const scope = boundaryScope(model, view);
+  if (!scope) return null;
+  const box = boundaryBox(
+    model,
+    scope.id,
+    absoluteRects(nodes.filter((n) => n.type !== 'boundary')),
+  );
   return {
     id: `${BOUNDARY_PREFIX}${scope.id}`,
     type: 'boundary',
-    position: { x: x1 - pad, y: y1 - top },
-    width,
-    height,
+    position: { x: box.x, y: box.y },
+    width: box.w,
+    height: box.h,
     // Tamaño conocido: si ReactFlow tuviera que medirlo, emitiría un cambio de dimensiones en
     // cada actualización y re-renderizaría todo el lienzo en bucle.
-    measured: { width, height },
+    measured: { width: box.w, height: box.h },
     selectable: false,
     draggable: false,
     focusable: false,
@@ -417,6 +436,82 @@ export function deriveEdges(
   return out;
 }
 
+/** Detalle del rótulo de un grupo: región · cuenta · CIDR. */
+export function groupDetail(el: ElementOf<'group'>): string {
+  return [el.group.region, el.group.account, el.group.cidr].filter(Boolean).join(' · ');
+}
+
+/** Líneas bajo el nombre de un nodo de despliegue: tipo · tecnología · tamaño · región, e identificadores. */
+export function deploymentCaption(el: ElementOf<'node'>): { caption: string; ids: string } {
+  const technology = (el.technology ?? []).map((t) => findTechnology(t)?.name ?? t);
+  return {
+    caption: [NODE_TYPE_LABEL[el.node.type], ...technology, el.node.size, el.node.region]
+      .filter(Boolean)
+      .join(' · '),
+    ids: [el.resource, ...(el.addresses ?? []), el.node.account].filter(Boolean).join(' · '),
+  };
+}
+
+/** Subtítulo del marco del elemento abierto. */
+export function boundaryCaption(el: Element): string {
+  return el.kind === 'system' ? 'Sistema · contenedores' : 'Contenedor · componentes';
+}
+
+// Títulos de los marcos según canvas.css (`.c4-deploy__head`, `.c4-group__label`,
+// `.c4-boundary__label`): ancho medio por carácter de cada tipografía, sin el costo.
+const DEPLOY_NAME_CHAR_W = 7.3; // Inter 12,5 px, 650
+const DEPLOY_CAPTION_CHAR_W = 6.1; // Inter 11 px
+const DEPLOY_IDS_CHAR_W = 6.3; // mono 10,5 px
+const DEPLOY_COUNT_CHAR_W = 6.6; // Inter 11 px, 600
+const GROUP_NAME_CHAR_W = 7; // Inter 12 px, 600
+const GROUP_DETAIL_CHAR_W = 6.8; // Inter 12 px, 500
+const BOUNDARY_NAME_CHAR_W = 7.6; // Inter 13 px, 650
+const BOUNDARY_CAPTION_CHAR_W = 6.4; // Inter 11,5 px, 500
+/** Aire bajo el título. */
+const TITLE_AIR = 4;
+
+/**
+ * Franja del título de un marco (nodo de despliegue, grupo o el elemento abierto en L2/L3): desde
+ * la esquina superior izquierda, tan ancha como el texto y tan alta como el nombre y sus
+ * subtítulos. El resto del marco es fondo, pero una etiqueta encima del título lo taparía.
+ */
+export function frameTitleRect(el: Element, frame: Rect): Rect {
+  let w: number;
+  let h: number;
+  if (el.kind === 'node') {
+    // Arriba 10 e izquierda 12; ícono de 26 + 8; nombre (16) y, separadas por 1, leyenda e
+    // identificadores (14 cada una).
+    const { caption, ids } = deploymentCaption(el);
+    const count =
+      el.node.instances && el.node.instances > 1
+        ? 6 + `×${el.node.instances}`.length * DEPLOY_COUNT_CHAR_W
+        : 0;
+    const text = Math.max(
+      el.name.length * DEPLOY_NAME_CHAR_W + count,
+      caption.length * DEPLOY_CAPTION_CHAR_W,
+      ids.length * DEPLOY_IDS_CHAR_W,
+    );
+    w = Math.min(12 + 26 + 8 + text, frame.w - 12);
+    h = 10 + Math.max(26, 16 + 15 + (ids ? 15 : 0));
+  } else if (el.kind === 'group') {
+    // Arriba 10 e izquierda 12; píldora con relleno 6/8, ícono de 14 y separaciones de 6.
+    const detail = groupDetail(el);
+    const text =
+      el.name.length * GROUP_NAME_CHAR_W + (detail ? 6 + detail.length * GROUP_DETAIL_CHAR_W : 0);
+    w = Math.min(12 + 6 + 14 + 6 + text + 8, frame.w - 12);
+    h = 10 + 21;
+  } else {
+    // Arriba 14 e izquierda 18; ícono de 15 y separaciones de 8.
+    const text =
+      el.name.length * BOUNDARY_NAME_CHAR_W +
+      8 +
+      boundaryCaption(el).length * BOUNDARY_CAPTION_CHAR_W;
+    w = Math.min(18 + 15 + 8 + text, frame.w);
+    h = 14 + 17;
+  }
+  return { x: frame.x, y: frame.y, w: Math.ceil(w), h: h + TITLE_AIR };
+}
+
 /** Puntos del trazo donde se prueba la etiqueta: primero el medio, después hacia los extremos. */
 const LABEL_SPOTS = [0.5, 0.42, 0.58, 0.34, 0.66, 0.27, 0.73, 0.2, 0.8];
 /** Aire alrededor de la etiqueta al comparar con nodos y con otras etiquetas. */
@@ -424,9 +519,10 @@ const LABEL_AIR = 6;
 const CELL = 256;
 
 /**
- * Ubica la etiqueta de cada flecha donde no tape un nodo ni otra etiqueta: la prueba en el medio
- * del trazo y, si choca, la corre a lo largo de la curva. Las flechas cortas eligen primero (tienen
- * menos lugar); las largas se acomodan después. Si no hay ningún lugar libre, queda donde tapa menos.
+ * Ubica la etiqueta de cada flecha donde no tape un nodo, el título de un marco ni otra etiqueta:
+ * la prueba en el medio del trazo y, si choca, la corre a lo largo de la curva. Las flechas cortas
+ * eligen primero (tienen menos lugar); las largas se acomodan después. Si no hay ningún lugar
+ * libre, queda donde tapa menos.
  */
 function placeEdgeLabels(model: Model, view: View, edges: RelationFlowEdge[]): void {
   const rects = new Map<Id, Rect>();
@@ -434,7 +530,8 @@ function placeEdgeLabels(model: Model, view: View, edges: RelationFlowEdge[]): v
     const el = model.elements[id];
     if (el) rects.set(id, { x: layout.x, y: layout.y, ...sizeOf(el, layout) });
   }
-  // Índice por celdas de lo que no se puede tapar: nodos (los marcos son fondo) y etiquetas ya ubicadas.
+  // Índice por celdas de lo que no se puede tapar: nodos, títulos de los marcos (el resto del marco
+  // es fondo) y etiquetas ya ubicadas.
   const grid = new Map<string, Rect[]>();
   const cells = (r: Rect) => {
     const keys: string[] = [];
@@ -447,7 +544,12 @@ function placeEdgeLabels(model: Model, view: View, edges: RelationFlowEdge[]): v
   const add = (r: Rect) => {
     for (const k of cells(r)) grid.set(k, [...(grid.get(k) ?? []), r]);
   };
-  for (const [id, r] of rects) if (!isFrameKind(model.elements[id]!.kind)) add(r);
+  for (const [id, r] of rects) {
+    const el = model.elements[id]!;
+    add(isFrameKind(el.kind) ? frameTitleRect(el, r) : r);
+  }
+  const scope = boundaryScope(model, view);
+  if (scope) add(frameTitleRect(scope, boundaryBox(model, scope.id, rects)));
   const covered = (r: Rect) => {
     const seen = new Set<Rect>();
     let area = 0;

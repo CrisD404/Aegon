@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import { edgeLabelSize, emptyModel, sizeOf, type Element, type Model, type Relation, type View } from '@aegon/core';
 import { demoModel } from '../lib/demo.ts';
 import { align, computeGuides, distribute, layeredLayout } from '../lib/geometry.ts';
-import { absoluteRects, deriveBoundary, deriveEdges, deriveNodes, visualParentOf } from './derive.ts';
+import {
+  absoluteRects,
+  deriveBoundary,
+  deriveEdges,
+  deriveNodes,
+  frameTitleRect,
+  visualParentOf,
+  type RelationFlowEdge,
+} from './derive.ts';
+import { floatingEnds, pointOnEdge, type Rect } from './edges/geometry.ts';
 
 const none = new Set<string>();
 
@@ -61,6 +71,78 @@ describe('deriveEdges', () => {
     const between = edges.filter((e) => [e.source, e.target].sort().join() === 'core-bancario,home-banking');
     expect(between).toHaveLength(1);
     expect(between[0]!.data!.bidirectional).toBe(true);
+  });
+});
+
+describe('ubicación de etiquetas', () => {
+  // Un nodo de despliegue y dos elementos sueltos unidos por una flecha horizontal a la altura `y`.
+  function crossing(y: number): { model: Model; view: View } {
+    const els: Element[] = [
+      { id: 'portal', kind: 'node', name: 'portal.example.com', node: { type: 'server' } },
+      { id: 'dns', kind: 'infra', name: 'DNS', infra: { type: 'dns' } },
+      { id: 'apim', kind: 'infra', name: 'API Manager', infra: { type: 'gateway' } },
+    ];
+    const rel: Relation = { id: 'dns--apim', from: 'dns', to: 'apim', label: 'Resuelve el portal' };
+    const view: View = {
+      id: 'despliegue',
+      name: 'Despliegue',
+      level: 'deployment',
+      nodes: {
+        portal: { x: 0, y: 0, w: 600, h: 300 },
+        dns: { x: -700, y: y - 40, w: 200, h: 80 },
+        apim: { x: 900, y: y - 40, w: 200, h: 80 },
+      },
+    };
+    const model: Model = {
+      ...emptyModel('m', 'M'),
+      elements: Object.fromEntries(els.map((e) => [e.id, e])),
+      relations: { [rel.id]: rel },
+      views: { [view.id]: view },
+    };
+    return { model, view };
+  }
+
+  function labelRect(model: Model, view: View, edge: RelationFlowEdge): Rect {
+    const rect = (id: string) => ({ x: view.nodes[id]!.x, y: view.nodes[id]!.y, ...sizeOf(model.elements[id]!, view.nodes[id]) });
+    const p = pointOnEdge(edge.data!.shape, floatingEnds(rect(edge.source), rect(edge.target)), edge.data!.labelT ?? 0.5)!;
+    const size = edgeLabelSize(edge.data!)!;
+    return { x: p.x - size.width / 2, y: p.y - size.height / 2, w: size.width, h: size.height };
+  }
+
+  const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+  it('corre la etiqueta que caería sobre el título de un marco', () => {
+    const { model, view } = crossing(20);
+    const [edge] = deriveEdges(model, view, none, none, none);
+    const title = frameTitleRect(model.elements.portal!, { x: 0, y: 0, w: 600, h: 300 });
+    expect(overlaps(labelRect(model, view, { ...edge!, data: { ...edge!.data!, labelT: undefined } }), title)).toBe(true);
+    expect(edge!.data!.labelT).toBeDefined();
+    expect(overlaps(labelRect(model, view, edge!), title)).toBe(false);
+  });
+
+  it('el resto del marco es fondo: la etiqueta queda en el medio', () => {
+    const { model, view } = crossing(200);
+    const [edge] = deriveEdges(model, view, none, none, none);
+    expect(edge!.data!.labelT).toBeUndefined();
+  });
+
+  it('la franja del título es tan ancha como el texto y tan alta como sus líneas', () => {
+    const frame = { x: 100, y: 50, w: 900, h: 400 };
+    const plain: Element = { id: 'dc', kind: 'node', name: 'Datacenter central', node: { type: 'datacenter' } };
+    const withIds: Element = { ...plain, addresses: ['10.0.0.0/16'] };
+    const group: Element = { id: 'g', kind: 'group', name: 'AWS', group: { provider: 'aws', region: 'us-east-1' } };
+    const system: Element = { id: 's', kind: 'system', name: 'Home Banking' };
+    for (const el of [plain, withIds, group, system]) {
+      const r = frameTitleRect(el, frame);
+      expect({ x: r.x, y: r.y }).toEqual({ x: 100, y: 50 });
+      expect(r.w).toBeGreaterThan(100);
+      expect(r.w).toBeLessThan(frame.w / 2);
+    }
+    expect(frameTitleRect(plain, frame).h).toBeLessThan(frameTitleRect(withIds, frame).h);
+    expect(frameTitleRect(withIds, frame).h).toBeGreaterThanOrEqual(56);
+    expect(frameTitleRect(withIds, frame).h).toBeLessThanOrEqual(64);
+    // Nunca más ancha que el marco.
+    expect(frameTitleRect({ ...plain, name: 'x'.repeat(200) }, frame).w).toBeLessThanOrEqual(frame.w);
   });
 });
 

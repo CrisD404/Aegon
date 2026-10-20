@@ -2,13 +2,13 @@ import { memo } from 'react';
 import { NodeResizer, type NodeProps } from '@xyflow/react';
 import { findProvider } from '@aegon/core';
 import { TechIcon } from '@aegon/icons';
-import type { BoundaryFlowNode, GroupFlowNode } from '../derive.ts';
+import { boundaryCaption, groupDetail, type BoundaryFlowNode, type GroupFlowNode } from '../derive.ts';
 import { CostBadge, elementIcon } from './ElementNode.tsx';
 
 function GroupNodeImpl({ data, selected }: NodeProps<GroupFlowNode>) {
   const el = data.element;
   const provider = findProvider(el.group.provider);
-  const detail = [el.group.region, el.group.account, el.group.cidr].filter(Boolean).join(' · ');
+  const detail = groupDetail(el);
   return (
     <div className="c4-group" data-provider={el.group.provider} data-frame-id={el.id} data-testid={`group-${el.id}`}>
       <NodeResizer isVisible={selected} minWidth={200} minHeight={120} />
@@ -33,7 +33,7 @@ function BoundaryNodeImpl({ data, width, height }: NodeProps<BoundaryFlowNode>) 
       <div className="c4-boundary__label">
         <TechIcon icon={icon} label={label} size={15} />
         {el.name}
-        <small>{el.kind === 'system' ? 'Sistema · contenedores' : 'Contenedor · componentes'}</small>
+        <small>{boundaryCaption(el)}</small>
         <CostBadge id={el.id} />
       </div>
     </div>
