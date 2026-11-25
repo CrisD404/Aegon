@@ -127,6 +127,23 @@ nodes:              # esquina superior izquierda, en coordenadas absolutas del l
   payments-db: { x: 320, y: 0, w: 224, h: 120 }
 edges:              # solo las relaciones con estilo distinto del default
   payments-api--payments-db: { shape: step }
+expanded: [ payments-api ]   # abiertos en el lugar: un marco con sus hijos adentro
+```
+
+**Varios niveles en un lienzo.** El nivel no limita lo que un lienzo muestra: `level` dice de dónde
+parte (y, en L2 y L3, qué elemento es su marco). `expanded` lista los sistemas o contenedores que
+el lienzo muestra **abiertos en el lugar**: se dibujan como un marco y sus hijos, que también
+están en `nodes`, quedan adentro. Así un lienzo de contexto puede mostrar los contenedores de un
+sistema y los componentes de uno de ellos, todo a la vez.
+
+Al cerrar un elemento, lo que contenía sale de `nodes` y su disposición se guarda en `folded`
+(por elemento cerrado, relativa a su esquina) para reabrirlo como estaba:
+
+```yaml
+folded:
+  payments:
+    payments-api: { x: 40, y: 64 }
+    payments-db: { x: 360, y: 64 }
 ```
 
 ## Despliegue
@@ -179,10 +196,13 @@ nivel, el ambiente y el sistema.
 - `parent`, `groups`, `from`, `to`, `scope` y las claves de `nodes` apuntan a elementos existentes.
 - Padres válidos según la tabla; sin ciclos.
 - Los grupos no tienen relaciones y no puede haber dos relaciones entre el mismo par.
-- Un lienzo L2 abre un `system` y uno L3 un `container`; cada nivel acepta ciertos tipos.
+- Un lienzo L2 abre un `system` y uno L3 un `container`. Un lienzo C4 acepta cualquier elemento
+  del modelo lógico; los nodos, la infraestructura y las instancias van solo en los de despliegue.
 - Un lienzo de despliegue necesita un `environment` del workspace y solo ubica lo que vale para
   ese ambiente; una instancia despliega un container, store, bus o system existente.
 - Avisos:
+  - Con `strictC4: true` en `aegon.yaml`, un elemento que no es del nivel de su lienzo (un
+    componente en un lienzo de contexto). Apagado por defecto.
   - Containers o componentes sin padre, e instancias fuera de un nodo.
   - Elementos que valen en ambientes donde su nodo no existe.
   - Elementos que no están en ningún lienzo.

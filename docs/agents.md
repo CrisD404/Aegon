@@ -1,19 +1,59 @@
 # Aegon para agentes de IA
 
 Aegon está pensado para que un agente (Claude Code, Claude Desktop, Cursor…) diseñe y mantenga
-arquitectura C4 junto con vos. Hay tres formas de trabajar, de más a menos guiada:
+arquitectura C4 junto con vos. Hay cuatro formas de trabajar:
 
 | Vía | Para qué | Dónde |
 |---|---|---|
+| **Skill** | El agente crea, edita y valida un workspace sin instalar nada: la CLI en un archivo más la guía de trabajo | [`skills/aegon`](../skills/aegon/SKILL.md) |
 | **Servidor MCP** | El agente lee y edita el modelo con herramientas que aplican las reglas de C4 | `packages/mcp` |
 | **CLI `aegon`** | Validar, analizar, editar y exportar desde la terminal o un script (CI, hooks) | `packages/cli` |
 | **YAML a mano** | Cualquier editor o agente sin herramientas; `AGENTS.md` en cada workspace explica el formato | [`format.md`](format.md) |
 
-Las tres escriben los mismos archivos. Si la **app de escritorio** tiene abierta la carpeta, cada
+Todas escriben los mismos archivos. Si la **app de escritorio** tiene abierta la carpeta, cada
 cambio aparece en vivo en el lienzo y en la pestaña Cambios (como un cambio sin commitear que se
 combina con tu borrador, ver [`sync.md`](sync.md)).
 
-Requisitos: Node 24 (ejecuta TypeScript sin compilar) y `pnpm install` en el repo de Aegon.
+Requisitos del servidor MCP y de la CLI: Node 24 (ejecuta TypeScript sin compilar) y `pnpm install`
+en el repo de Aegon. La skill solo necesita `node`.
+
+## Skill
+
+[`skills/aegon`](../skills/aegon) es una carpeta autocontenida con el formato de las Agent Skills
+(Claude Code, Codex, Cursor…): un `SKILL.md` con el flujo de trabajo, referencias que el agente lee
+cuando las necesita y la CLI empaquetada en un solo archivo.
+
+```
+skills/aegon/
+├─ SKILL.md                 # cuándo usarla, modos, autoría, compuerta, entrega y respuesta
+├─ references/
+│  ├─ modeling.md           # elementos, relaciones, lienzos, despliegue, flujos, catálogos
+│  ├─ cli.md                # comandos y opciones
+│  └─ repair.md             # códigos de diagnóstico y cómo se arreglan
+├─ examples/tienda-online.mjs   # el ciclo completo sobre un sistema ficticio
+└─ bin/aegon.mjs            # la CLI en un archivo: corre con `node`, sin pnpm ni el monorepo
+```
+
+**Instalarla.** Copiá la carpeta al directorio de skills del agente. En Claude Code:
+
+```bash
+git clone https://github.com/CrisD404/Aegon
+cp -r Aegon/skills/aegon ~/.claude/skills/aegon          # para todos tus proyectos
+cp -r Aegon/skills/aegon mi-repo/.claude/skills/aegon    # o solo para un repo
+```
+
+**Usarla.** Pedí la arquitectura con tus palabras ("documentá la arquitectura de este repo",
+"diagramame un sistema de reservas con C4") o, en Claude Code, invocala con `/aegon`. El agente arma el workspace
+con `init`, `add`, `connect` y `layout`, escribe en YAML lo que la CLI no cubre (lienzos de detalle,
+ambientes y flujos) y no da el trabajo por terminado hasta que `validate --strict --info` y `lint`
+salen con código `0`. Entrega la carpeta: se abre en <https://crisd404.github.io/Aegon/> con
+**Abrir carpeta** (Chrome o Edge) o en la app de escritorio. Desde la CLI no sale una imagen; para
+una vista rápida, `export mermaid`.
+
+**Regenerar la CLI empaquetada.** `bin/aegon.mjs` es un artefacto: después de cambiar
+`packages/cli`, `packages/core` o `packages/format-yaml`, corré `pnpm build:skill` y commiteá el
+resultado. Usa el `rolldown` que ya trae vite, sin dependencias nuevas, y el archivo sale idéntico
+si el código no cambió.
 
 ## Servidor MCP
 

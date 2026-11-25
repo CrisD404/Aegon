@@ -209,7 +209,8 @@ describe('escritura', () => {
     const placed = (await mcp.call('place', { view: 'landscape', elements: ['core', 'banking'], positions: { banking: { x: 10, y: 20 } } })).json;
     expect(placed.nodes).toEqual({ banking: { x: 10, y: 20 } });
     expect(placed.skipped).toEqual(['core']);
-    const wrong = await mcp.call('place', { view: 'landscape', elements: ['accounts'] });
+    // El elemento abierto es el marco de su propio lienzo: no se ubica adentro.
+    const wrong = await mcp.call('place', { view: 'banking-containers', elements: ['banking'] });
     expect(wrong.isError).toBe(true);
     expect(wrong.text).toContain('[invalid-placement]');
 

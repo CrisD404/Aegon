@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function openContainers(page: import('@playwright/test').Page) {
-  await page.getByTestId('node-home-banking').dblclick();
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await framed(page, 'home-banking-containers');
 }
 
@@ -66,7 +66,7 @@ test('guardar un elemento como template y reutilizarlo', async ({ page }) => {
   await page.getByTestId('ghost-input').fill('servicio de pagos');
   await page.locator('[data-testid^="ghost-template-user:"]', { hasText: 'Servicio de pagos' }).click();
   await expect(page.getByTestId('node-pagos-api-2')).toBeVisible();
-  await page.getByTestId('node-pagos-api-2').dblclick();
+  await page.getByTestId('node-pagos-api-2').dblclick({ modifiers: ['Alt'] });
   await expect(page.getByTestId('breadcrumbs')).toContainText('Pagos API');
   await expect(page.getByTestId('node-transfer-controller-2')).toBeVisible();
 

@@ -23,6 +23,7 @@ import { useLod } from '../lod.ts';
 import { useNodeCost } from '../costs.ts';
 import { moneyCompact } from '../../lib/money.ts';
 import { INFRA_TYPE_ICON, NODE_TYPE_ICON } from './deployment-icons.tsx';
+import { toggleExpand } from '../../lib/actions.ts';
 
 /** Costo mensual del nodo (propio + hijos) con la capa de costos activa. */
 export function CostBadge({ id }: { id: string }) {
@@ -198,10 +199,21 @@ function ElementNodeImpl({ data, width, height, selected }: NodeProps<ElementFlo
             </span>
           ) : null}
           {data.canDrill ? (
-            <span className="c4-node__badge c4-node__drill" title={`Doble click para abrir ${el.kind === 'system' ? 'los contenedores (L2)' : 'los componentes (L3)'}`}>
+            <button
+              type="button"
+              className="c4-node__badge c4-node__drill nodrag nopan"
+              title={`Abrir acá ${el.kind === 'system' ? 'sus contenedores' : 'sus componentes'} (doble click o Enter)`}
+              aria-label={`Abrir ${el.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleExpand(el.id);
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              data-testid={`expand-${el.id}`}
+            >
               <Layers size={10} />
               {data.childCount || (data.hasChildView ? '·' : '+')}
-            </span>
+            </button>
           ) : null}
         </div>
         {rows.length ? (

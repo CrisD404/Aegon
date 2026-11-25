@@ -14,6 +14,7 @@ import {
   goUp,
   paste,
   removeSelectionFromView,
+  toggleExpand,
 } from './actions.ts';
 
 function isTyping(target: EventTarget | null): boolean {
@@ -122,7 +123,9 @@ export function useShortcuts() {
         const el = ws.model.elements[id];
         if (el && childLevelOf(el.kind)) {
           e.preventDefault();
-          void canvasApi.zoomToNode(id).then(() => drillInto(id));
+          // Enter abre o cierra en el lugar; con Alt, va a su lienzo de detalle.
+          if (e.altKey) void canvasApi.zoomToNode(id).then(() => drillInto(id));
+          else toggleExpand(id);
         }
         return;
       }

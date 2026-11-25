@@ -322,8 +322,8 @@ export function revertChangeOp(base: Model, current: Model, change: Change): Op 
       const currentView = current.views[id]!;
       const ops: Op[] = [];
       const meta = patchToBase(
-        { name: baseView.name, description: baseView.description },
-        { name: currentView.name, description: currentView.description },
+        { name: baseView.name, description: baseView.description, expanded: baseView.expanded, folded: baseView.folded },
+        { name: currentView.name, description: currentView.description, expanded: currentView.expanded, folded: currentView.folded },
       );
       if (Object.keys(meta).length) ops.push({ type: 'view.update', id, patch: meta });
       const unplace = Object.keys(currentView.nodes).filter((n) => !baseView.nodes[n]);

@@ -512,6 +512,189 @@
   font-size: 11.5px;
 }
 
+/* Elemento abierto en el lugar: un sistema o contenedor que muestra a sus hijos adentro. */
+.c4-open {
+  --kind: var(--kind-system);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-radius: 22px;
+  border: 1.5px solid color-mix(in srgb, var(--kind) 36%, var(--line));
+  background: color-mix(in srgb, var(--kind) 4%, transparent);
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+
+.c4-open[data-kind='container'] {
+  --kind: var(--kind-container);
+  border-radius: 18px;
+}
+
+.c4-open[data-external] {
+  border-style: dashed;
+}
+
+.c4-open[data-new] {
+  animation: aegon-node-in var(--dur-3) var(--ease-spring);
+}
+
+.c4-open__head {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 28px);
+  color: var(--kind);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.c4-open__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c4-open__head small {
+  color: var(--fg-subtle);
+  font-weight: 500;
+  font-size: 11.5px;
+}
+
+.c4-open__btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: var(--kind);
+  background: color-mix(in srgb, var(--kind) 12%, var(--canvas));
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    opacity var(--dur-1) var(--ease-out);
+}
+
+.c4-open__btn:hover {
+  background: color-mix(in srgb, var(--kind) 24%, var(--canvas));
+}
+
+/* "Abrir aparte" aparece al pasar por el encabezado o con el marco seleccionado. */
+.c4-open__detail {
+  opacity: 0;
+  color: var(--fg-muted);
+  background: var(--raised);
+}
+
+.c4-open__head:hover .c4-open__detail,
+.c4-open__detail:focus-visible,
+.react-flow__node-open.selected .c4-open__detail {
+  opacity: 1;
+}
+
+.react-flow__node-open {
+  pointer-events: none !important;
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+.react-flow__node-open .c4-open__edge,
+.react-flow__node-open .c4-open__head,
+.react-flow__node-open .react-flow__handle,
+.react-flow__node-open.selected .c4-open {
+  pointer-events: all;
+}
+
+.react-flow__node-open.selected .c4-open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Borde "agarrable" del marco (el interior deja pasar clicks al lienzo). */
+.c4-open__edge {
+  position: absolute;
+  inset: -6px;
+  border-radius: 28px;
+  border: 8px solid transparent;
+}
+
+.react-flow[data-lod='far'] .c4-open__head small,
+.react-flow[data-lod='far'] .c4-open__detail {
+  display: none;
+}
+
+.c4-open__head .c4-cost {
+  position: static;
+}
+
+/* La insignia de hijos de una tarjeta es un botón: abre el elemento en el lugar. */
+button.c4-node__drill {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--dur-1) var(--ease-out);
+}
+
+button.c4-node__drill:hover {
+  background: color-mix(in srgb, var(--kind) 26%, transparent);
+}
+
+/* Profundidad del lienzo: cuánto del modelo se ve abierto. */
+.canvas-depth {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+}
+
+.canvas-shell:has(.ruler) .canvas-depth {
+  top: 36px;
+}
+
+.canvas-depth button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--fg-subtle);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--dur-1) var(--ease-out),
+    background var(--dur-1) var(--ease-out);
+}
+
+.canvas-depth button:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+
+.canvas-depth button[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 /* Relaciones ------------------------------------------------------------------------------------ */
 
 .c4-edge-path {

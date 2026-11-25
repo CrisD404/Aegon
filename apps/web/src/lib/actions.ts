@@ -21,6 +21,16 @@ import {
   canHaveParent,
   newInstance,
   fitFramesOp,
+  applyOp,
+  c4ChildrenOf,
+  canExpandInView,
+  fitExpandedOp,
+  isExpandedInView,
+  setDepthOp,
+  toggleExpandOp,
+  unplaceWithNested,
+  type Depth,
+  type Model,
 } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
@@ -46,6 +56,41 @@ function dispatch(op: Op, label?: string) {
   return ws().dispatch(op, label ? { label } : {});
 }
 
+/**
+ * Los marcos abiertos envuelven justo a su contenido: después de mover, crear o ubicar algo
+ * adentro, se suma su ajuste al mismo lote (un solo paso de deshacer).
+ */
+export function withOpenFit(model: Model, viewId: Id, ops: Op[]): Op[] {
+  if (!ops.length || !model.views[viewId]?.expanded?.length) return ops;
+  try {
+    let next = model;
+    for (const op of ops) next = applyOp(next, op).model;
+    const fit = fitExpandedOp(next, viewId);
+    return fit ? [...ops, fit] : ops;
+  } catch {
+    // Si el lote es inválido, lo informa dispatch con su mensaje.
+    return ops;
+  }
+}
+
+/**
+ * Elemento abierto en el lugar (el más chico) que contiene el punto. Con un tipo, solo los que
+ * pueden ser padre de ese tipo (un componente va en un contenedor, no en un sistema).
+ */
+export function openFrameAt(model: Model, view: View, point: { x: number; y: number }, kind?: ElementKind): Id | null {
+  let best: { id: Id; area: number } | null = null;
+  for (const id of view.expanded ?? []) {
+    const el = model.elements[id];
+    const layout = view.nodes[id];
+    if (!el || !layout || (kind && !canHaveParent(kind, el.kind))) continue;
+    const s = sizeOf(el, layout);
+    if (point.x < layout.x || point.x > layout.x + s.w || point.y < layout.y || point.y > layout.y + s.h) continue;
+    const area = s.w * s.h;
+    if (!best || area < best.area) best = { id, area };
+  }
+  return best?.id ?? null;
+}
+
 export function createElementAt(
   kind: ElementKind,
   name: string,
@@ -64,6 +109,9 @@ export function createElementAt(
     const nodeType = kind === 'node' ? (fields as { node?: { type?: string } }).node?.type : undefined;
     if (!nodeType || !['datacenter', 'cloud', 'region', 'zone'].includes(nodeType)) fields.environments = [view.environment];
   }
+  // Dentro de un elemento abierto en el lugar, lo nuevo es hijo suyo.
+  const inside = fields.parent === undefined ? openFrameAt(model, view, at, kind) : null;
+  if (inside) fields.parent = inside;
   const { op, id } = createElementOp(model, {
     kind,
     name: name.trim() || KIND_LABEL[kind],
@@ -71,7 +119,7 @@ export function createElementAt(
     at: centered,
     fields,
   });
-  const ops: Op[] = [op, ...groupMembershipOps(model, view, id, kind, centered, size)];
+  const ops: Op[] = [op, ...(inside ? [] : groupMembershipOps(model, view, id, kind, centered, size))];
   let relationId: Id | null = null;
   if (opts.connectFrom && kind !== 'group') {
     // El elemento es nuevo: la relación siempre se crea.
@@ -79,7 +127,7 @@ export function createElementAt(
     if (rel.op) ops.push(rel.op);
     relationId = rel.id;
   }
-  if (!dispatch({ type: 'batch', ops, label: `Agregar ${name || KIND_LABEL[kind]}` })) return null;
+  if (!dispatch({ type: 'batch', ops: withOpenFit(model, view.id, ops), label: `Agregar ${name || KIND_LABEL[kind]}` })) return null;
   ui().markFresh(relationId ? [id, relationId] : [id]);
   ui().select([id], []);
   return id;
@@ -174,9 +222,44 @@ export function placeExisting(
     const rel = connectOp(model, opts.connectFrom, id);
     if (rel.op) ops.push(rel.op);
   }
-  if (!dispatch({ type: 'batch', ops, label: `Ubicar ${el.name}` })) return false;
+  if (!dispatch({ type: 'batch', ops: withOpenFit(model, view.id, ops), label: `Ubicar ${el.name}` })) return false;
   ui().markFresh([id]);
   ui().select([id]);
+  return true;
+}
+
+/**
+ * Abre o cierra un sistema o contenedor en el lugar: sus hijos aparecen dentro de un marco, en el
+ * mismo lienzo. Donde no se puede (un lienzo de despliegue), abre su lienzo de detalle.
+ */
+export function toggleExpand(id: Id): boolean {
+  const view = activeView();
+  const model = ws().model;
+  if (!view || !model.elements[id]) return false;
+  if (!canExpandInView(model, view, id)) return drillInto(id);
+  const opening = !isExpandedInView(view, id);
+  const op = toggleExpandOp(model, view.id, id);
+  if (!op || !dispatch(op)) return false;
+  ui().select([id]);
+  if (opening) {
+    const kids = c4ChildrenOf(model, id);
+    ui().markFresh(kids.map((k) => k.id));
+    canvasApi.reveal([id]);
+    if (!kids.length) ui().toast('Está vacío: hacé doble click adentro para crear lo que contiene');
+  }
+  return true;
+}
+
+/** Lleva todo el lienzo a una profundidad: contexto (1), contenedores (2) o componentes (3). */
+export function setDepth(depth: Depth): boolean {
+  const view = activeView();
+  if (!view) return false;
+  const op = setDepthOp(ws().model, view.id, depth);
+  if (!op) return false;
+  if (!dispatch(op)) return false;
+  ui().select([]);
+  // Cambió el tamaño de todo: se vuelve a encuadrar cuando ReactFlow ya tiene los nodos nuevos.
+  requestAnimationFrame(() => requestAnimationFrame(() => canvasApi.fit()));
   return true;
 }
 
@@ -262,10 +345,18 @@ export function removeSelectionFromView() {
   const edges = ui().selection.edges.filter(
     (e) => !e.startsWith(IMPLIED_PREFIX) && ws().model.relations[e],
   );
-  const ops: Op[] = [];
-  if (ids.length) ops.push({ type: 'view.unplace', view: view.id, ids });
+  let ops: Op[] = [];
+  if (ids.length) {
+    // Un elemento abierto se va con lo que contiene.
+    const out = unplaceWithNested(ws().model, view.id, ids);
+    ops.push({ type: 'view.unplace', view: view.id, ids: out?.ids ?? ids });
+    if (out && (view.expanded ?? []).length !== (out.expanded ?? []).length) {
+      ops.push({ type: 'view.update', id: view.id, patch: { expanded: out.expanded } });
+    }
+  }
   for (const e of edges) ops.push({ type: 'relation.remove', id: e });
   if (!ops.length) return;
+  ops = withOpenFit(ws().model, view.id, ops);
   if (
     dispatch({ type: 'batch', ops, label: ids.length ? 'Quitar del lienzo' : 'Eliminar relación' })
   ) {

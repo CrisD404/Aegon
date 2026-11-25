@@ -27,8 +27,9 @@ import {
   Trash2,
   Wand2,
   Server,
+  SquareArrowOutUpRight,
 } from 'lucide-react';
-import type { EdgeShape, Id } from '@aegon/core';
+import { canExpandInView, isExpandedInView, type EdgeShape, type Id } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import {
@@ -41,6 +42,7 @@ import {
   duplicateSelection,
   paste,
   removeSelectionFromView,
+  toggleExpand,
 } from '../lib/actions.ts';
 import { openNewDeploymentView, openTemplates, saveSelectionAsTemplate } from '../lib/flows.tsx';
 import { IMPLIED_PREFIX } from './derive.ts';
@@ -130,16 +132,21 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
     content = (
       <>
         <div className="menu-label">{el.name}</div>
+        {canDrill && view && canExpandInView(model, view, el.id) ? (
+          <Item icon={<Layers size={14} />} shortcut="↵" onSelect={() => toggleExpand(el.id)}>
+            {isExpandedInView(view, el.id) ? 'Cerrar' : el.kind === 'system' ? 'Abrir acá sus contenedores' : 'Abrir acá sus componentes'}
+          </Item>
+        ) : null}
         {canDrill ? (
           <Item
-            icon={<Layers size={14} />}
-            shortcut="↵"
+            icon={<SquareArrowOutUpRight size={14} />}
+            shortcut="Alt ↵"
             onSelect={async () => {
               await canvasApi.zoomToNode(el.id);
               drillInto(el.id);
             }}
           >
-            {el.kind === 'system' ? 'Abrir contenedores (L2)' : 'Abrir componentes (L3)'}
+            Abrir en un lienzo aparte
           </Item>
         ) : null}
         {el.kind === 'system' && el.scope !== 'external' ? (

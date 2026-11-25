@@ -125,10 +125,18 @@ describe('aegon add', () => {
     const bad = await cli(dir, 'add', 'component', 'Suelto', '--parent', 'banking');
     expect(bad.code).toBe(1);
     expect(bad.err).toContain('Un component no puede estar dentro de un system [invalid-parent]');
-    const placement = await cli(dir, 'add', 'component', 'Otro', '--parent', 'api', '--view', 'landscape');
+    // Un nodo de despliegue no va en un lienzo C4 (el nivel, en cambio, no limita: ver el test de abajo).
+    const placement = await cli(dir, 'add', 'node', 'Clúster', '--view', 'landscape');
     expect(placement.code).toBe(1);
     expect(placement.err).toContain('[invalid-placement]');
     expect(await modelOnDisk(dir)).toEqual(before);
+  });
+
+  it('un lienzo de contexto acepta elementos de otros niveles', async () => {
+    const dir = tempWorkspace(sampleModel());
+    const mixed = await cli(dir, 'add', 'component', 'Otro', '--parent', 'api', '--view', 'landscape');
+    expect(mixed.code).toBe(0);
+    expect((await modelOnDisk(dir)).views.landscape!.nodes.otro).toBeDefined();
   });
 
   it('valida los argumentos', async () => {

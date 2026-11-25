@@ -18,6 +18,10 @@ Reglas que conviene saber antes de editar un workspace:
 - [Sincronización con git](docs/sync.md): merge semántico por entidad, Commit & push y cambios externos en la app de escritorio.
 - [README](README.md): qué es Aegon, cómo correrlo, atajos y estructura del repo.
 
+## Skill
+
+- [skills/aegon](skills/aegon/SKILL.md): skill para agentes (Claude Code, Codex, Cursor) que crea, edita y valida un workspace sin instalar el repo. Trae la CLI en un solo archivo (`node skills/aegon/bin/aegon.mjs <comando>`), el flujo de trabajo (autoría con `init`, `add`, `connect` y `layout`; compuerta `validate --strict --info` más `lint`; entrega de la carpeta y exportación a Mermaid) y referencias de [modelado](skills/aegon/references/modeling.md), [CLI](skills/aegon/references/cli.md) y [reparación](skills/aegon/references/repair.md). Se instala copiando `skills/aegon` a la carpeta de skills del agente (`~/.claude/skills/aegon` en Claude Code). `pnpm build:skill` regenera la CLI empaquetada.
+
 ## Esquemas
 
 - [workspace.schema.json](docs/schema/workspace.schema.json): `aegon.yaml`.

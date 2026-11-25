@@ -1,12 +1,14 @@
 import type { Edge, Node } from '@xyflow/react';
 import {
+  c4ChildrenOf,
   childLevelOf,
   childViewOf,
   descendantsOf,
   edgeLabelSize,
   findTechnology,
   indexOf,
-  isFrameKind,
+  isExpandedInView,
+  isFrameInView,
   isNetworkRelation,
   NODE_TYPE_LABEL,
   projectedEdges,
@@ -52,14 +54,23 @@ export interface BoundaryNodeData extends Record<string, unknown> {
   element: Element;
 }
 
+/** Sistema o contenedor abierto en el lugar: un marco con sus hijos adentro. */
+export interface OpenNodeData extends Record<string, unknown> {
+  element: Element;
+  /** Hijos C4 que tiene en el modelo (los muestre o no este lienzo). */
+  childCount: number;
+  fresh: boolean;
+}
+
 export type ElementFlowNode = Node<ElementNodeData, 'element'>;
 export type GroupFlowNode = Node<GroupNodeData, 'group'>;
 export type DeploymentFlowNode = Node<DeploymentNodeData, 'deployment'>;
 export type BoundaryFlowNode = Node<BoundaryNodeData, 'boundary'>;
-export type AegonNode = ElementFlowNode | GroupFlowNode | DeploymentFlowNode | BoundaryFlowNode;
+export type OpenFlowNode = Node<OpenNodeData, 'open'>;
+export type AegonNode = ElementFlowNode | GroupFlowNode | DeploymentFlowNode | BoundaryFlowNode | OpenFlowNode;
 
 /** Tipos de nodo de ReactFlow que son marcos (contienen a otros). */
-export const FRAME_NODE_TYPES = new Set(['group', 'deployment']);
+export const FRAME_NODE_TYPES = new Set(['group', 'deployment', 'open']);
 
 export interface RelationEdgeData extends Record<string, unknown> {
   relations: Relation[];
@@ -94,14 +105,15 @@ export function derivedEdgeEnds(id: string): { from: Id; to: Id } | null {
   return from && to ? { from, to } : null;
 }
 
-function groupDepth(model: Model, id: Id): number {
+/** Cuántos marcos del lienzo contienen a este (los marcos se dibujan de afuera hacia adentro). */
+function frameDepth(model: Model, view: View, id: Id): number {
   let depth = 0;
-  let current = model.elements[id]?.parent;
-  const seen = new Set<Id>();
+  let current = model.elements[id] ? coreVisualParentOf(model, view, model.elements[id]!) : undefined;
+  const seen = new Set<Id>([id]);
   while (current && !seen.has(current)) {
     seen.add(current);
     depth++;
-    current = model.elements[current]?.parent;
+    current = model.elements[current] ? coreVisualParentOf(model, view, model.elements[current]!) : undefined;
   }
   return depth;
 }
@@ -113,7 +125,7 @@ export const visualParentOf = coreVisualParentOf;
 // no se vuelve a renderizar.
 const dataCache = new WeakMap<
   Element,
-  { key: string; data: ElementNodeData | GroupNodeData | DeploymentNodeData }
+  { key: string; data: ElementNodeData | GroupNodeData | DeploymentNodeData | OpenNodeData }
 >();
 
 function nodeData(
@@ -121,12 +133,13 @@ function nodeData(
   extra:
     | Omit<ElementNodeData, 'element'>
     | Omit<GroupNodeData, 'element'>
-    | Omit<DeploymentNodeData, 'element'>,
+    | Omit<DeploymentNodeData, 'element'>
+    | Omit<OpenNodeData, 'element'>,
 ) {
   const key = JSON.stringify(extra);
   const cached = dataCache.get(el);
   if (cached && cached.key === key) return cached.data;
-  const data = { element: el, ...extra } as ElementNodeData | GroupNodeData | DeploymentNodeData;
+  const data = { element: el, ...extra } as ElementNodeData | GroupNodeData | DeploymentNodeData | OpenNodeData;
   dataCache.set(el, { key, data });
   return data;
 }
@@ -134,7 +147,7 @@ function nodeData(
 /** Nodos de ReactFlow para un lienzo. Las posiciones del YAML son absolutas; ReactFlow usa relativas al grupo. */
 export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): AegonNode[] {
   const idx = indexOf(model);
-  const groups: (GroupFlowNode | DeploymentFlowNode)[] = [];
+  const groups: (GroupFlowNode | DeploymentFlowNode | OpenFlowNode)[] = [];
   const others: ElementFlowNode[] = [];
 
   for (const [id, layout] of Object.entries(view.nodes)) {
@@ -154,7 +167,7 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
         width: size.w,
         height: size.h,
         ...(parentId ? { parentId } : {}),
-        zIndex: -10 + groupDepth(model, id),
+        zIndex: -10 + frameDepth(model, view, id),
         data: nodeData(el, { fresh: fresh.has(id) }) as GroupNodeData,
       });
       continue;
@@ -167,8 +180,21 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
         width: size.w,
         height: size.h,
         ...(parentId ? { parentId } : {}),
-        zIndex: -10 + groupDepth(model, id),
+        zIndex: -10 + frameDepth(model, view, id),
         data: nodeData(el, { fresh: fresh.has(id) }) as DeploymentNodeData,
+      });
+      continue;
+    }
+    if (isExpandedInView(view, id)) {
+      groups.push({
+        id,
+        type: 'open',
+        position,
+        width: size.w,
+        height: size.h,
+        ...(parentId ? { parentId } : {}),
+        zIndex: -10 + frameDepth(model, view, id),
+        data: nodeData(el, { childCount: c4ChildrenOf(model, id).length, fresh: fresh.has(id) }) as OpenNodeData,
       });
       continue;
     }
@@ -457,6 +483,14 @@ export function boundaryCaption(el: Element): string {
   return el.kind === 'system' ? 'Sistema · contenedores' : 'Contenedor · componentes';
 }
 
+/** Subtítulo de un elemento abierto en el lugar: qué es y cuánto contiene. */
+export function openCaption(el: Element, count: number): string {
+  const kind = el.kind === 'system' ? (el.scope === 'external' ? 'Sistema externo' : 'Sistema') : 'Contenedor';
+  if (!count) return `${kind} · vacío`;
+  const noun = el.kind === 'system' ? (count === 1 ? 'contenedor' : 'contenedores') : count === 1 ? 'componente' : 'componentes';
+  return `${kind} · ${count} ${noun}`;
+}
+
 // Títulos de los marcos según canvas.css (`.c4-deploy__head`, `.c4-group__label`,
 // `.c4-boundary__label`): ancho medio por carácter de cada tipografía, sin el costo.
 const DEPLOY_NAME_CHAR_W = 7.3; // Inter 12,5 px, 650
@@ -501,13 +535,14 @@ export function frameTitleRect(el: Element, frame: Rect): Rect {
     w = Math.min(12 + 6 + 14 + 6 + text + 8, frame.w - 12);
     h = 10 + 21;
   } else {
-    // Arriba 14 e izquierda 18; ícono de 15 y separaciones de 8.
+    // Arriba 14 e izquierda 18; ícono de 15 y separaciones de 8 (un marco abierto en el lugar suma
+    // el botón de cerrar, de 22).
     const text =
       el.name.length * BOUNDARY_NAME_CHAR_W +
       8 +
       boundaryCaption(el).length * BOUNDARY_CAPTION_CHAR_W;
-    w = Math.min(18 + 15 + 8 + text, frame.w);
-    h = 14 + 17;
+    w = Math.min(18 + 22 + 15 + 8 + text, frame.w);
+    h = 14 + 22;
   }
   return { x: frame.x, y: frame.y, w: Math.ceil(w), h: h + TITLE_AIR };
 }
@@ -546,7 +581,7 @@ function placeEdgeLabels(model: Model, view: View, edges: RelationFlowEdge[]): v
   };
   for (const [id, r] of rects) {
     const el = model.elements[id]!;
-    add(isFrameKind(el.kind) ? frameTitleRect(el, r) : r);
+    add(isFrameInView(model, view, id) ? frameTitleRect(el, r) : r);
   }
   const scope = boundaryScope(model, view);
   if (scope) add(frameTitleRect(scope, boundaryBox(model, scope.id, rects)));

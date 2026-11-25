@@ -26,14 +26,14 @@ import { agentsMd, GITATTRIBUTES, GITIGNORE } from './agents-md.ts';
 
 /** Orden canónico de claves: el YAML resultante es estable y fácil de revisar en un diff. */
 const ORDER = {
-  workspace: ['schema', 'id', 'name', 'description', 'organization', 'architect', 'code', 'version', 'date', 'defaultView', 'environments', 'finops', 'extensions'],
+  workspace: ['schema', 'id', 'name', 'description', 'organization', 'architect', 'code', 'version', 'date', 'defaultView', 'strictC4', 'environments', 'finops', 'extensions'],
   element: [
     'id', 'kind', 'name', 'description', 'parent', 'groups', 'scope', 'status', 'risk', 'technology',
     'containerType', 'role', 'store', 'bus', 'group', 'node', 'infra', 'instance', 'addresses', 'resource', 'owner',
     'tags', 'links', 'environments', 'finops', 'properties', 'docs', 'extensions',
   ],
   relation: ['id', 'from', 'to', 'label', 'description', 'protocols', 'ports', 'direction', 'status', 'tags', 'properties', 'extensions'],
-  view: ['id', 'name', 'level', 'scope', 'environment', 'description', 'nodes', 'edges', 'extensions'],
+  view: ['id', 'name', 'level', 'scope', 'environment', 'description', 'nodes', 'edges', 'expanded', 'folded', 'extensions'],
   store: ['engine', 'customEngine', 'customIcon', 'type', 'version', 'managed'],
   bus: ['broker', 'customBroker', 'customIcon', 'type', 'topics'],
   group: ['provider', 'region', 'account', 'cidr'],
@@ -96,6 +96,7 @@ export function canonicalView(view: View): Record<string, unknown> {
   const value: Record<string, unknown> = { ...view };
   value.nodes = orderedRecord(view.nodes, (l) => ordered(l, ORDER.layout));
   if (view.edges) value.edges = orderedRecord(view.edges, (e) => ordered(e, ORDER.edge));
+  if (view.folded) value.folded = orderedRecord(view.folded, (inner) => orderedRecord(inner, (l) => ordered(l, ORDER.layout)));
   return ordered(value, ORDER.view);
 }
 

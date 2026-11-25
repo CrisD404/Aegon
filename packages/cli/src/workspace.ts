@@ -166,7 +166,13 @@ export function resolveRef<T extends { id: Id; name: string }>(items: readonly T
   const byId = items.find((i) => i.id === ref);
   if (byId) return byId;
   const wanted = normalize(ref);
-  const byName = items.filter((i) => normalize(i.name) === wanted);
+  let byName = items.filter((i) => normalize(i.name) === wanted);
+  // Una instancia de despliegue se llama como lo que despliega: el nombre refiere al elemento del
+  // modelo lógico (las instancias se nombran por ID, que lleva el ambiente: `pagos-api-prod`).
+  if (byName.length > 1) {
+    const logical = byName.filter((i) => (i as { kind?: string }).kind !== 'instance');
+    if (logical.length) byName = logical;
+  }
   if (byName.length === 1) return byName[0]!;
   if (byName.length > 1) {
     throw new WorkspaceError('ambiguous', `Hay varios ${noun}s llamados "${ref}": ${byName.map((i) => i.id).join(', ')}. Usá el ID.`);

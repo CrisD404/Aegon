@@ -3,7 +3,7 @@ import type { Id, NodeLayout, View } from '../schema/index.ts';
 import { allViewEdges, sizeOf, type ViewEdge } from '../ops/commands.ts';
 import { relationTechnology } from '../catalog/index.ts';
 import type { Op } from '../ops/index.ts';
-import { isFrameKind, visualParentOf } from './index.ts';
+import { isFrameInView, visualParentOf } from './index.ts';
 
 /** Grafo de ELK (el subconjunto que usa Aegon, sin depender de `elkjs` en el núcleo). */
 export type ElkLayoutOptions = Record<string, string>;
@@ -175,7 +175,7 @@ export function buildElkGraph(model: Model, view: View, ids?: readonly Id[]): El
   const selection = ids && ids.length > 1 ? new Set(ids) : null;
   const placed = Object.keys(view.nodes).filter((id) => model.elements[id]);
   const leaves = placed.filter(
-    (id) => !isFrameKind(model.elements[id]!.kind) && (!selection || selection.has(id)),
+    (id) => !isFrameInView(model, view, id) && (!selection || selection.has(id)),
   );
   if (leaves.length < 2) return null;
 
@@ -209,7 +209,7 @@ export function buildElkGraph(model: Model, view: View, ids?: readonly Id[]): El
     root.children = leaves.sort(byPosition).map((id) => elkNodes.get(id)!);
   } else {
     // Jerarquía visual: cada nodo cuelga del grupo (ubicado) que lo contiene.
-    const groups = placed.filter((id) => isFrameKind(model.elements[id]!.kind));
+    const groups = placed.filter((id) => isFrameInView(model, view, id));
     const childrenOf = new Map<Id, Id[]>();
     for (const id of [...leaves, ...groups]) {
       const parent = visualParentOf(model, view, model.elements[id]!) ?? '__root';
@@ -217,7 +217,7 @@ export function buildElkGraph(model: Model, view: View, ids?: readonly Id[]): El
     }
     const build = (id: Id): ElkGraphNode => {
       const children = (childrenOf.get(id) ?? []).sort(byPosition);
-      if (!isFrameKind(model.elements[id]?.kind ?? 'system')) return elkNodes.get(id)!;
+      if (!isFrameInView(model, view, id)) return elkNodes.get(id)!;
       targets.add(id);
       if (!children.length) {
         const layout = view.nodes[id]!;
@@ -369,15 +369,15 @@ export function elkResultToOp(
     if (!prev || !el) continue;
     const x = Math.round(r.x + dx);
     const y = Math.round(r.y + dy);
-    nodes[id] = isFrameKind(el.kind)
+    nodes[id] = isFrameInView(model, view, id)
       ? { x, y, w: Math.round(r.w), h: Math.round(r.h) }
       : { ...prev, x, y };
   }
 
   // Ordenando una selección, los marcos de sus miembros vuelven a envolverlos.
-  if (plan.targets.every((id) => !isFrameKind(model.elements[id]?.kind ?? 'system'))) {
+  if (plan.targets.every((id) => !isFrameInView(model, view, id))) {
     for (const [gid, layout] of Object.entries(view.nodes)) {
-      if (!isFrameKind(model.elements[gid]?.kind ?? 'system')) continue;
+      if (!isFrameInView(model, view, gid)) continue;
       const members = Object.keys(view.nodes).filter(
         (id) => model.elements[id] && visualParentOf(model, view, model.elements[id]!) === gid,
       );

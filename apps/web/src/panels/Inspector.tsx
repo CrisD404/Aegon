@@ -790,7 +790,7 @@ function ViewInspector({ view }: { view: View }) {
         <Stat label="En el modelo" value={Object.keys(model.elements).length} />
       </div>
       <div className="rounded-md border border-line bg-raised/50 px-3 py-2.5 text-[12px] leading-relaxed text-fg-muted">
-        <span className="font-medium text-fg">Tip:</span> doble click en el lienzo crea un elemento; doble click en un sistema o contenedor baja de nivel; <span className="font-mono">Alt ↑</span> sube.
+        <span className="font-medium text-fg">Tip:</span> doble click en el lienzo crea un elemento; doble click en un sistema o contenedor lo abre acá mismo, con lo que contiene adentro (con <span className="font-mono">Alt</span>, en un lienzo aparte).
       </div>
     </Panel>
   );

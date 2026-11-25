@@ -1,2 +1,4 @@
 pnpm-lock.yaml
 dist
+# Bundle generado de la CLI para la skill (`pnpm build:skill`)
+skills/aegon/bin

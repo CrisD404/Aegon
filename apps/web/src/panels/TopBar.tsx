@@ -23,6 +23,7 @@ import {
   Wallet,
   FileText,
   ImageDown,
+  Activity,
 } from 'lucide-react';
 import { parentViewOf, type Model, type View } from '@aegon/core';
 import { Glyph, TechIcon } from '@aegon/icons';
@@ -48,6 +49,7 @@ import {
 import { viewBadge } from '../lib/view-badge.ts';
 import { Button, IconButton, Kbd, cn } from '../ui/primitives.tsx';
 import { useChangeCount, useUnsaved } from './ChangesPanel.tsx';
+import { healthCount, useHealth } from './HealthPanel.tsx';
 
 export function Logo({ size = 22 }: { size?: number }) {
   return (
@@ -390,6 +392,7 @@ export function TopBar() {
           <PanelRight size={16} />
         </IconButton>
         <div className="mx-1 h-5 w-px bg-line" />
+        <HealthIndicator />
         <SyncIndicator />
         <button
           type="button"
@@ -442,6 +445,26 @@ export function TopBar() {
         )}
       </div>
     </header>
+  );
+}
+
+/** Salud del modelo: aparece solo si hay errores o avisos, y abre el panel que los lista. */
+function HealthIndicator() {
+  const { errors, warnings } = healthCount(useHealth());
+  if (!errors && !warnings) return null;
+  const n = errors || warnings;
+  return (
+    <button
+      type="button"
+      onClick={() => useUi.getState().setRightTab('health')}
+      className="flex h-8 items-center gap-1.5 rounded-sm px-2 text-[12.5px] font-medium text-fg-muted transition-colors hover:bg-hover hover:text-fg"
+      title={errors ? `${errors} ${errors === 1 ? 'error' : 'errores'} en el modelo` : `${warnings} ${warnings === 1 ? 'aviso' : 'avisos'} en el modelo`}
+      data-testid="health-indicator"
+    >
+      <Activity size={14} className={errors ? 'text-danger' : 'text-warn'} />
+      Salud
+      <span className={cn('min-w-[20px] rounded-full px-1.5 text-center text-[11px] font-semibold tabular-nums leading-[18px]', errors ? 'bg-danger/15 text-danger' : 'bg-warn/15 text-warn')}>{n}</span>
+    </button>
   );
 }
 

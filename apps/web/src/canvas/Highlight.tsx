@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { deployedIn, visualParentOf, type View } from '@aegon/core';
+import { deployedIn, isExpandedInView, visualParentOf, type View } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import type { RelationFlowEdge } from './derive.ts';
@@ -58,7 +58,24 @@ export function CanvasHighlight({
       );
     }
     if (focusMode && selected.length) {
-      const keep = focusSet(selected, edges);
+      // Un elemento abierto en el lugar es todo lo que contiene: sus dependencias son las de adentro.
+      const focus = new Set(selected);
+      const open = selected.filter((id) => isExpandedInView(view, id));
+      if (open.length) {
+        for (const id of Object.keys(view.nodes)) {
+          const seen = new Set<string>();
+          let parent = model.elements[id] ? visualParentOf(model, view, model.elements[id]!) : undefined;
+          while (parent && !seen.has(parent)) {
+            if (open.includes(parent)) {
+              focus.add(id);
+              break;
+            }
+            seen.add(parent);
+            parent = model.elements[parent] ? visualParentOf(model, view, model.elements[parent]!) : undefined;
+          }
+        }
+      }
+      const keep = focusSet([...focus], edges);
       // Un marco seleccionado (grupo, nodo de despliegue) no atenúa lo que contiene.
       const inside = (id: string): boolean => {
         const el = model.elements[id];
@@ -67,13 +84,13 @@ export function CanvasHighlight({
       };
       for (const id of Object.keys(view.nodes)) if (!keep.nodes.has(id) && inside(id)) keep.nodes.add(id);
       // Suave (es el modo por defecto) y nunca mientras se arrastra: reacomodar necesita ver todo.
-      const focus = `${scope}:not(:has(.react-flow__node.dragging))`;
-      const rules = [`${focus} .react-flow__node-element:not(:is(${byId(keep.nodes)})) { opacity: 0.38; }`];
+      const still = `${scope}:not(:has(.react-flow__node.dragging))`;
+      const rules = [`${still} .react-flow__node-element:not(:is(${byId(keep.nodes)})) { opacity: 0.38; }`];
       if (keep.edges.size) {
-        rules.push(`${focus} .react-flow__edge:not(:is(${byId(keep.edges)})) { opacity: 0.18; }`);
-        rules.push(`${focus} .c4-edge-label:not(:is(${labels(keep.edges)})) { opacity: 0.25; }`);
+        rules.push(`${still} .react-flow__edge:not(:is(${byId(keep.edges)})) { opacity: 0.18; }`);
+        rules.push(`${still} .c4-edge-label:not(:is(${labels(keep.edges)})) { opacity: 0.25; }`);
       } else {
-        rules.push(`${focus} .react-flow__edge, ${focus} .c4-edge-label { opacity: 0.18; }`);
+        rules.push(`${still} .react-flow__edge, ${still} .c4-edge-label { opacity: 0.18; }`);
       }
       return withEnv(rules.join('\n'));
     }

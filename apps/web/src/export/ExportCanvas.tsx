@@ -6,13 +6,14 @@ import { deriveBoundary, deriveEdges, deriveNodes, type AegonNode, type Relation
 import { ElementNode } from '../canvas/nodes/ElementNode.tsx';
 import { BoundaryNode, GroupNode } from '../canvas/nodes/GroupNode.tsx';
 import { DeploymentNode } from '../canvas/nodes/DeploymentNode.tsx';
+import { OpenNode } from '../canvas/nodes/OpenNode.tsx';
 import { EdgeMarkers, RelationEdge } from '../canvas/edges/RelationEdge.tsx';
 import { CommentsLayer } from '../canvas/Comments.tsx';
 import { LodContext } from '../canvas/lod.ts';
 import type { SheetTone } from './ExportSheet.tsx';
 import { withInlinedSvgStyles } from './svg-styles.ts';
 
-const nodeTypes = { element: ElementNode, group: GroupNode, deployment: DeploymentNode, boundary: BoundaryNode };
+const nodeTypes = { element: ElementNode, group: GroupNode, deployment: DeploymentNode, boundary: BoundaryNode, open: OpenNode };
 const edgeTypes = { relation: RelationEdge };
 const NONE: ReadonlySet<Id> = new Set();
 

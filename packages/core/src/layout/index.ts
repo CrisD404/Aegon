@@ -20,10 +20,21 @@ function frameDepth(model: Model, id: Id): number {
   return depth;
 }
 
+/** ¿El lienzo muestra abierto (como marco, con sus hijos adentro) a este sistema o contenedor? */
+export function isExpandedInView(view: View, id: Id): boolean {
+  return !!view.nodes[id] && !!view.expanded?.includes(id);
+}
+
+/** ¿El elemento se dibuja como marco en este lienzo? Grupos, nodos de despliegue y lo abierto. */
+export function isFrameInView(model: Model, view: View, id: Id): boolean {
+  const el = model.elements[id];
+  return !!el && (isFrameKind(el.kind) || isExpandedInView(view, id));
+}
+
 /**
  * Marco (ubicado en el lienzo) que contiene visualmente a un elemento: para grupos y elementos
- * de despliegue, el ancestro ubicado más cercano; para el resto, el grupo ubicado más profundo
- * de los que integra.
+ * de despliegue, el ancestro ubicado más cercano; para el resto, su ancestro C4 más cercano que
+ * el lienzo muestra abierto y, si no hay, el grupo ubicado más profundo de los que integra.
  */
 export function visualParentOf(model: Model, view: View, el: Element): Id | undefined {
   if (el.kind === 'group' || el.kind === 'node' || el.kind === 'infra' || el.kind === 'instance') {
@@ -36,6 +47,15 @@ export function visualParentOf(model: Model, view: View, el: Element): Id | unde
       current = parent?.parent;
     }
     return undefined;
+  }
+  if (view.expanded?.length) {
+    let current = el.parent;
+    const seen = new Set<Id>();
+    while (current && !seen.has(current)) {
+      if (isExpandedInView(view, current)) return current;
+      seen.add(current);
+      current = model.elements[current]?.parent;
+    }
   }
   let best: Id | undefined;
   let bestDepth = -1;
@@ -197,7 +217,7 @@ export function arrangeViewOp(model: Model, viewId: Id, ids?: readonly Id[]): Op
     if (nested !== undefined) return nested;
   }
   const targets = (ids && ids.length > 1 ? ids : Object.keys(view.nodes)).filter(
-    (id) => view.nodes[id] && model.elements[id] && model.elements[id].kind !== 'group',
+    (id) => view.nodes[id] && model.elements[id] && model.elements[id].kind !== 'group' && !isExpandedInView(view, id),
   );
   const rects = targets.map((id) => {
     const layout = view.nodes[id]!;

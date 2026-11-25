@@ -80,12 +80,15 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
   const nq = normalize(query);
   const deployment = view.level === 'deployment';
 
+  const insideKind = ghost.inside ? model.elements[ghost.inside]?.kind : undefined;
   const kinds = useMemo(() => {
-    const allowed = KINDS_FOR_LEVEL[view.level];
+    // Dentro de un elemento abierto en el lugar se crea lo que ese elemento contiene.
+    const allowed: readonly ElementKind[] =
+      insideKind === 'system' ? ['container', 'store', 'bus'] : insideKind === 'container' ? ['component', 'store'] : KINDS_FOR_LEVEL[view.level];
     return ghost.kind && allowed.includes(ghost.kind)
       ? [ghost.kind, ...allowed.filter((k) => k !== ghost.kind)]
       : [...allowed];
-  }, [ghost.kind, view.level]);
+  }, [ghost.kind, view.level, insideKind]);
   // Una instancia no se crea de la nada: se elige qué desplegar (sección "Desplegar").
   const creatable = (ghost.connectFrom ? kinds.filter((k) => k !== 'group') : kinds).filter(
     (k) => k !== 'instance',

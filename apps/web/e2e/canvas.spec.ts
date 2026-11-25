@@ -29,11 +29,11 @@ test('el fantasma sugiere motores de base de datos', async ({ page }) => {
   await expect(node).toContainText('MongoDB');
 });
 
-test('doble click baja de nivel y los breadcrumbs suben', async ({ page }) => {
-  await page.getByTestId('node-home-banking').dblclick();
+test('Alt + doble click abre el lienzo de detalle y los breadcrumbs suben', async ({ page }) => {
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await expect(page.getByTestId('node-pagos-api')).toBeVisible();
   await expect(page.getByTestId('breadcrumbs')).toContainText('Home Banking');
-  await page.getByTestId('node-pagos-api').dblclick();
+  await page.getByTestId('node-pagos-api').dblclick({ modifiers: ['Alt'] });
   await expect(page.getByTestId('node-transfer-controller')).toBeVisible();
   await expect(page.getByTestId('breadcrumbs')).toContainText('Pagos API');
   await page.keyboard.press('Escape');
@@ -46,7 +46,7 @@ test('doble click baja de nivel y los breadcrumbs suben', async ({ page }) => {
 });
 
 test('un elemento existente se linkea en otro lienzo, no se duplica', async ({ page }) => {
-  await page.getByTestId('node-home-banking').dblclick();
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await expect(page.getByTestId('node-web-app')).toBeVisible();
   const p = await emptyPoint(page);
   await page.mouse.dblclick(p.x, p.y);
@@ -57,7 +57,7 @@ test('un elemento existente se linkea en otro lienzo, no se duplica', async ({ p
 });
 
 test('si lo escrito coincide con algo del modelo, Enter lo reutiliza en vez de duplicarlo', async ({ page }) => {
-  await page.getByTestId('node-home-banking').dblclick();
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await expect(page.getByTestId('node-web-app')).toBeVisible();
   const p = await emptyPoint(page);
   await page.mouse.dblclick(p.x, p.y);
@@ -228,7 +228,7 @@ test('conectar arrastrando desde el punto del borde, sin duplicar relaciones', a
 });
 
 test('al seleccionar un elemento se animan las flechas hacia sus dependencias', async ({ page }) => {
-  await page.getByTestId('node-home-banking').dblclick();
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await framed(page, 'home-banking-containers');
   await page.getByTestId('node-api-gateway').click();
   const out = page.locator('.c4-edge-path[data-flow="out"]');
@@ -238,10 +238,102 @@ test('al seleccionar un elemento se animan las flechas hacia sus dependencias', 
 });
 
 test('el bus de mensajería es un tipo propio y sugiere su protocolo', async ({ page }) => {
-  await page.getByTestId('node-home-banking').dblclick();
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await framed(page, 'home-banking-containers');
   await expect(page.getByTestId('node-eventos')).toContainText('Apache Kafka');
   await page.getByTestId('edge-label-pagos-api--eventos').click();
   await expect(page.getByText('Sugeridos para stream')).toBeVisible();
 });
 
+test('doble click abre un sistema en el lugar, con sus contenedores adentro, y se cierra igual', async ({ page }) => {
+  await page.getByTestId('node-home-banking').dblclick();
+  // Sigue en el mismo lienzo: el sistema es un marco y sus contenedores están adentro.
+  const frame = page.getByTestId('open-home-banking');
+  await expect(frame).toBeVisible();
+  await expect(frame).toContainText('8 contenedores');
+  await expect(page.getByTestId('breadcrumbs')).not.toContainText('Home Banking');
+  const outer = (await frame.boundingBox())!;
+  for (const id of ['web-app', 'api-gateway', 'pagos-api', 'banking-db']) {
+    const inner = (await page.getByTestId(`node-${id}`).boundingBox())!;
+    expect(inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height).toBe(true);
+  }
+  expect(await changesCount(page)).toBeGreaterThan(0);
+
+  // Se cierra desde el encabezado y el lienzo vuelve a estar como antes.
+  await page.getByTestId('collapse-home-banking').click();
+  await expect(page.getByTestId('node-home-banking')).toBeVisible();
+  await expect(page.getByTestId('node-web-app')).toHaveCount(0);
+  // Abrir y cerrar son un paso de deshacer cada uno.
+  await page.keyboard.press('Control+z');
+  await expect(page.getByTestId('open-home-banking')).toBeVisible();
+  await page.keyboard.press('Control+z');
+  await expect(page.getByTestId('node-home-banking')).toBeVisible();
+  expect(await changesCount(page)).toBe(0);
+});
+
+test('la profundidad lleva todo el lienzo a componentes y de vuelta a contexto', async ({ page }) => {
+  await expect(page.getByTestId('depth-1')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('depth-3').click();
+  await expect(page.getByTestId('open-home-banking')).toBeVisible();
+  await expect(page.getByTestId('open-pagos-api')).toBeVisible();
+  await expect(page.getByTestId('node-transfer-controller')).toBeVisible();
+  await expect(page.getByTestId('depth-3')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('depth-1').click();
+  await expect(page.getByTestId('node-home-banking')).toBeVisible();
+  await expect(page.getByTestId('node-web-app')).toHaveCount(0);
+  await expect(page.getByTestId('depth-1')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('doble click dentro de un sistema abierto crea un contenedor suyo', async ({ page }) => {
+  await page.getByTestId('expand-notificaciones').click();
+  const frame = page.getByTestId('open-notificaciones');
+  await expect(frame).toContainText('vacío');
+  const box = (await frame.boundingBox())!;
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height * 0.65);
+  // Adentro de un sistema se ofrece lo que un sistema contiene.
+  await expect(page.locator('[cmdk-item]').first()).toContainText('Contenedor');
+  await page.getByTestId('ghost-input').fill('Envío de mails');
+  await page.keyboard.press('Enter');
+  const node = page.getByTestId('node-envio-de-mails');
+  await expect(node).toBeVisible();
+  await expect(frame).toContainText('1 contenedor');
+  // Es hijo del sistema en el modelo: aparece bajo Notificaciones en el explorador.
+  await page.getByTestId('tree-notificaciones').getByRole('button', { name: 'Expandir' }).click();
+  await expect(page.getByTestId('tree-envio-de-mails')).toBeVisible();
+});
+
+test('la pestaña Lienzos muestra cómo crear un lienzo de despliegue', async ({ page }) => {
+  await page.getByRole('button', { name: 'Lienzos', exact: true }).click();
+  const button = page.getByTestId('new-deployment-view');
+  await expect(button).toBeInViewport({ ratio: 1 });
+  await button.click();
+  await expect(page.getByTestId('deployment-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  // La demo ya trae un despliegue para ver cómo queda.
+  await page.getByTestId('view-row-home-banking-despliegue-prod').click();
+  await framed(page, 'home-banking-despliegue-prod');
+  await expect(page.getByTestId('deploy-vpc-prod')).toBeVisible();
+  await expect(page.getByTestId('node-pagos-api-prod')).toBeVisible();
+});
+
+test('el panel Salud lista lo que conviene revisar y lleva al elemento', async ({ page }) => {
+  // La demo no tiene errores ni avisos: el indicador de la barra no aparece.
+  await expect(page.getByTestId('health-indicator')).toHaveCount(0);
+  await page.getByTestId('tab-health').click();
+  await expect(page.getByTestId('health-summary')).toHaveText('Sin problemas');
+  await page.getByTestId('health-panel').getByText('Motor antifraude').click();
+  await expect(page.getByTestId('breadcrumbs')).toContainText('Pagos API');
+
+  // Un contenedor nuevo de un sistema que ya tiene despliegue es un aviso (todavía no se desplegó):
+  // aparece el indicador en la barra y el hallazgo en el panel.
+  await page.getByTestId('breadcrumbs').getByText('Home Banking').click();
+  await framed(page, 'home-banking-containers');
+  const p = await emptyPoint(page);
+  await page.mouse.dblclick(p.x, p.y);
+  await page.getByTestId('ghost-input').fill('Conciliación');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('node-conciliacion')).toBeVisible();
+  await expect(page.getByTestId('health-indicator')).toBeVisible();
+  await page.getByTestId('health-indicator').click();
+  await expect(page.getByTestId('health-panel')).toContainText('Conciliación');
+});

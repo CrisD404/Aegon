@@ -30,7 +30,7 @@ import {
 import { canHaveParent, sizeOf, type Element, type ElementKind, type Id, type NodeLayout, type Op } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
-import { connect, drillInto, placeExisting, revealElement } from '../lib/actions.ts';
+import { connect, drillInto, openFrameAt, placeExisting, revealElement, toggleExpand, withOpenFit } from '../lib/actions.ts';
 import { computeGuides, contains, type GuideLine } from '../lib/geometry.ts';
 import {
   BOUNDARY_PREFIX,
@@ -45,6 +45,8 @@ import {
 import { ElementNode } from './nodes/ElementNode.tsx';
 import { BoundaryNode, GroupNode } from './nodes/GroupNode.tsx';
 import { DeploymentNode } from './nodes/DeploymentNode.tsx';
+import { OpenNode } from './nodes/OpenNode.tsx';
+import { DepthControl } from './DepthControl.tsx';
 import { EdgeMarkers, RelationEdge } from './edges/RelationEdge.tsx';
 import { GHOST_PANEL_WIDTH, GhostPicker } from './GhostPicker.tsx';
 import { Rulers } from './Rulers.tsx';
@@ -64,12 +66,12 @@ import { CommentPlacer, CommentsLayer, StepPicker } from './Comments.tsx';
 
 /** Color de cada nodo en el minimapa: el de su tipo (los grupos, solo el contorno del marco). */
 function minimapColor(node: Node): string {
-  if (node.type === 'boundary' || node.type === 'group' || node.type === 'deployment') return 'transparent';
+  if (node.type === 'boundary' || node.type === 'group' || node.type === 'deployment' || node.type === 'open') return 'transparent';
   const kind = (node.data as { element?: { kind?: string } }).element?.kind ?? 'system';
   return `var(--kind-${kind})`;
 }
 
-const nodeTypes = { element: ElementNode, group: GroupNode, deployment: DeploymentNode, boundary: BoundaryNode };
+const nodeTypes = { element: ElementNode, group: GroupNode, deployment: DeploymentNode, boundary: BoundaryNode, open: OpenNode };
 const edgeTypes = { relation: RelationEdge };
 
 const LOD_STEPS: [maxZoom: number, lod: string][] = [
@@ -260,6 +262,9 @@ export function Canvas() {
         const el = m.elements[d.id];
         const r = rects.get(d.id);
         if (!el || !r) continue;
+        // Lo que está dentro de un elemento abierto le pertenece en el modelo: soltarlo en otro
+        // lado no lo saca ni lo cambia de grupo (el marco lo sigue).
+        if (insideOpen(current, d.id)) continue;
         const c = { x: r.x + r.w / 2, y: r.y + r.h / 2 };
         const excluded = new Set([d.id]);
         if (FRAME_NODE_TYPES.has(d.type ?? ''))
@@ -294,7 +299,7 @@ export function Canvas() {
         const label = dragged.length
           ? `Mover ${dragged.length === 1 ? (m.elements[dragged[0]!.id]?.name ?? '') : `${dragged.length} nodos`}`
           : 'Redimensionar';
-        const ok = useWorkspace.getState().dispatch({ type: 'batch', ops, label });
+        const ok = useWorkspace.getState().dispatch({ type: 'batch', ops: withOpenFit(m, v.id, ops), label });
         if (!ok) setNodes(withBoundary(derived));
       }
     },
@@ -392,7 +397,7 @@ export function Canvas() {
         const rects = absoluteRects(next);
         const first = rects.get(moving[0]!.id);
         const draggedEl = useWorkspace.getState().model.elements[moving[0]!.id];
-        if (first && draggedEl) {
+        if (first && draggedEl && !insideOpen(next, moving[0]!.id)) {
           const c = { x: first.x + first.w / 2, y: first.y + first.h / 2 };
           let best: { id: Id; area: number } | null = null;
           for (const n of next) {
@@ -430,13 +435,17 @@ export function Canvas() {
       const bounds = shellRef.current?.getBoundingClientRect();
       if (!bounds) return;
       const flow = rf.screenToFlowPosition({ x: clientX, y: clientY });
+      const m = useWorkspace.getState().model;
+      const v = viewId ? m.views[viewId] : undefined;
+      const inside = v ? openFrameAt(m, v, flow) : null;
       useUi.getState().setGhost({
         screen: { x: clientX - bounds.left, y: clientY - bounds.top },
         flow,
+        ...(inside ? { inside } : {}),
         ...extra,
       });
     },
-    [rf],
+    [rf, viewId],
   );
 
   const onDoubleClick = useCallback(
@@ -449,8 +458,8 @@ export function Canvas() {
   );
 
   const onNodeDoubleClick = useCallback(async (e: ReactMouseEvent, node: Node) => {
-    // En el interior de un marco (nodo de despliegue o grupo) se crea adentro; en su encabezado, se renombra.
-    if ((node.type === 'deployment' || node.type === 'group') && !(e.target as HTMLElement).closest('.c4-deploy__head, .c4-group__label')) {
+    // En el interior de un marco (nodo de despliegue, grupo o elemento abierto) se crea adentro; en su encabezado, se renombra.
+    if ((node.type === 'deployment' || node.type === 'group' || node.type === 'open') && !(e.target as HTMLElement).closest('.c4-deploy__head, .c4-group__label, .c4-open__head')) {
       openGhost(e.clientX, e.clientY);
       return;
     }
@@ -461,8 +470,11 @@ export function Canvas() {
       return;
     }
     if (node.type === 'element' && (node.data as { canDrill?: boolean }).canDrill) {
-      await canvasApi.zoomToNode(node.id);
-      drillInto(node.id);
+      // Se abre en el lugar (sus hijos aparecen adentro); con Alt, en su lienzo de detalle.
+      if (e.altKey) {
+        await canvasApi.zoomToNode(node.id);
+        drillInto(node.id);
+      } else toggleExpand(node.id);
       return;
     }
     if (node.type !== 'boundary') {
@@ -606,7 +618,7 @@ export function Canvas() {
             if (!a) return n;
             const p = n.parentId ? abs.get(n.parentId) : undefined;
             const position = { x: a.x - (p?.x ?? 0), y: a.y - (p?.y ?? 0) };
-            return n.type === 'group' || n.type === 'deployment'
+            return n.type === 'group' || n.type === 'deployment' || n.type === 'open'
               ? ({ ...n, position, width: a.w, height: a.h } as AegonNode)
               : ({ ...n, position } as AegonNode);
           });
@@ -870,6 +882,7 @@ export function Canvas() {
       {view && !presenting ? <CanvasHighlight view={view} edges={edges} /> : null}
       {view && !presenting ? <CanvasSearch view={view} /> : null}
       {view && !presenting ? <CostChip view={view} /> : null}
+      {view && !presenting ? <DepthControl view={view} /> : null}
       {view ? <CommentPlacer view={view} /> : null}
       <StepPicker />
       <FlowPlayer />
@@ -908,6 +921,12 @@ function isDescendant(nodes: readonly Node[], id: string, ancestor: string): boo
     current = byId.get(current)?.parentId;
   }
   return false;
+}
+
+/** ¿El nodo está dentro de un elemento abierto en el lugar? */
+function insideOpen(nodes: readonly Node[], id: string): boolean {
+  const parentId = nodes.find((n) => n.id === id)?.parentId;
+  return !!parentId && nodes.find((n) => n.id === parentId)?.type === 'open';
 }
 
 /** Tipo de marco donde puede caer un elemento: nodos de despliegue o grupos. */

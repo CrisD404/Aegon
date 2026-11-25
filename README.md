@@ -22,7 +22,25 @@ Cada push a `main` publica la web y un release nuevo (`v0.1.<n>`) con el changel
 
 **Fase 0 · Fundaciones**, **Fase 1 · Lienzo MVP**, **Fase 2 · Escritorio + Git**,
 **Fase 3 · IA first**, **Fase 4 · Escala y layout** y **Fase 5 · FinOps y ambientes** listas,
-más **flujos** y **comentarios**.
+más **flujos**, **comentarios**, **varios niveles en un lienzo**, **salud del modelo** y la
+**skill para agentes**.
+
+Un lienzo, varios niveles (ver [`docs/format.md`](docs/format.md#lienzos)):
+
+- **Abrir en el lugar:** doble click (o `Enter`) en un sistema lo convierte en un marco con sus
+  contenedores adentro, en el mismo lienzo; lo mismo en un contenedor con sus componentes. Lo que lo
+  rodea se corre para hacerle lugar y, al cerrarlo, todo vuelve a donde estaba. Con `Alt` se abre en
+  un lienzo aparte, como antes.
+- **Profundidad:** el control arriba a la derecha lleva todo el lienzo a **Contexto**,
+  **Contenedores** o **Componentes** de una vez.
+- **Reglas C4 como avisos:** un lienzo acepta elementos de cualquier nivel. Quien quiera un lienzo
+  por nivel activa **C4 estricto** en el panel Salud y la mezcla aparece como aviso.
+- **Salud del modelo:** el panel **Salud** muestra lo que antes solo salía por `aegon lint`
+  (errores, avisos, ciclos de dependencias, riesgo concentrado, elementos sin relaciones y
+  relaciones sin protocolo); cada hallazgo lleva al lienzo. Si hay errores o avisos, la barra
+  superior lo indica.
+- **Despliegue a la vista:** la pestaña Lienzos tiene su botón **Despliegue** y el workspace de
+  ejemplo trae el despliegue de producción de Home Banking.
 
 Flujos y comentarios (ver [`docs/format.md`](docs/format.md#flujos)):
 
@@ -104,8 +122,9 @@ Fases 0 y 1:
 - **Componente fantasma:** doble click en el lienzo, escribís un nombre y elegís crear o **linkear
   un elemento existente** del modelo. Detecta motores de BD (`post` → PostgreSQL) y proveedores
   (`aws` → grupo AWS). Soltar una conexión en el vacío también abre el fantasma.
-- **Niveles:** doble click en un sistema abre sus contenedores (L2), en un contenedor sus
-  componentes (L3); breadcrumbs y `Alt ↑` para subir.
+- **Niveles:** doble click en un sistema abre sus contenedores y en un contenedor sus componentes,
+  en el lugar; `Alt` + doble click los abre en su lienzo de detalle (L2 o L3), con breadcrumbs y
+  `Alt ↑` para subir.
 - **Explorador** virtualizado: modelo (filtros L1/L2/L3), grupos por proveedor, lienzos y
   dependencias del elemento seleccionado; arrastrar al lienzo ubica el elemento.
 - **Inspector** por tipo: actor (interno/externo, rol), base de datos (motor del catálogo u "otro"
@@ -163,6 +182,26 @@ claude mcp add aegon -- node C:/Projects/Aegon/packages/mcp/src/main.ts --worksp
 
 Comandos, herramientas y prompts de ejemplo en [`docs/agents.md`](docs/agents.md).
 
+### Skill para agentes
+
+[`skills/aegon`](skills/aegon) es una Agent Skill (Claude Code, Codex, Cursor…): una carpeta
+autocontenida con la CLI en un solo archivo, que corre con `node` sin instalar el repo. El agente
+arma el workspace desde una descripción o leyendo tu repositorio, lo ordena y no lo da por
+terminado hasta que `validate` y `lint` pasan.
+
+```bash
+git clone https://github.com/CrisD404/Aegon
+```
+
+```bash
+cp -r Aegon/skills/aegon ~/.claude/skills/aegon
+```
+
+Después pedile "documentá la arquitectura de este repo con Aegon". El resultado es una carpeta que
+abrís en <https://crisd404.github.io/Aegon/> con **Abrir carpeta** (Chrome o Edge) o en la app de
+escritorio; para una vista rápida, el agente exporta a Mermaid. Detalles en
+[`docs/agents.md`](docs/agents.md#skill). `pnpm build:skill` regenera la CLI empaquetada.
+
 | Script | Qué hace |
 |---|---|
 | `pnpm dev` | App en modo desarrollo (puerto 5180) |
@@ -172,6 +211,7 @@ Comandos, herramientas y prompts de ejemplo en [`docs/agents.md`](docs/agents.md
 | `pnpm desktop:dev` / `pnpm desktop:build` | App de escritorio en desarrollo / ejecutable de release |
 | `pnpm test:desktop` | E2E de la app de escritorio real (lanza el `.exe` y se conecta a WebView2) |
 | `pnpm gen:schema` | Regenera los JSON Schema en `docs/schema/` |
+| `pnpm build:skill` | Regenera la CLI empaquetada de la skill (`skills/aegon/bin/aegon.mjs`) |
 | `pnpm gen:large` | Genera un workspace de ~5k elementos en `fixtures/large/` |
 | `pnpm aegon <comando>` | CLI de Aegon (`validate`, `lint`, `add`, `connect`, `layout`, `diff`, `export`) |
 | `pnpm mcp -- --workspace <carpeta>` | Servidor MCP por stdio (para probarlo a mano; los clientes lo lanzan solos) |
@@ -181,7 +221,8 @@ Comandos, herramientas y prompts de ejemplo en [`docs/agents.md`](docs/agents.md
 | Atajo | Acción |
 |---|---|
 | Doble click en el lienzo | Componente fantasma (crear o linkear) |
-| Doble click / `Enter` en sistema o contenedor | Bajar de nivel |
+| Doble click / `Enter` en sistema o contenedor | Abrirlo o cerrarlo en el lugar |
+| `Alt` + doble click / `Alt Enter` | Abrirlo en un lienzo aparte (L2 o L3) |
 | `Alt ↑` | Subir de nivel |
 | `Ctrl K` | Paleta de comandos |
 | `Shift` + arrastrar | Guías de alineación |
@@ -210,6 +251,8 @@ packages/
   icons/         glifos C4 propios + marcas monocromas (simple-icons)
   cli/           CLI `aegon` y el workspace en disco que comparte con el MCP
   mcp/           servidor MCP (stdio) para agentes de IA
+skills/
+  aegon/         Agent Skill: guía de trabajo, referencias y la CLI en un archivo
 apps/
   web/           app React (Vite): lienzo, paneles, stores (zustand)
   desktop/       app de escritorio (Tauri 2 + Rust: disco, git, observador de archivos)

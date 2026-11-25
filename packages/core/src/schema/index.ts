@@ -409,6 +409,16 @@ export const View = z.object({
   nodes: z.record(Id, NodeLayout),
   /** Estilo por relación (solo para las que se apartan del default). */
   edges: z.record(Id, EdgeStyle).optional(),
+  /**
+   * Sistemas o contenedores que este lienzo muestra abiertos en el lugar: un marco con sus hijos
+   * adentro. Así un mismo lienzo puede mostrar varios niveles C4 a la vez.
+   */
+  expanded: z.array(Id).optional(),
+  /**
+   * Disposición de lo que contiene un elemento cerrado, relativa a su esquina, para volver a
+   * abrirlo como estaba. Clave: ID del elemento cerrado.
+   */
+  folded: z.record(Id, z.record(Id, NodeLayout)).optional(),
   extensions: Extensions.optional(),
 });
 export type View = z.infer<typeof View>;
@@ -448,6 +458,11 @@ export const WorkspaceMeta = z.object({
   date: z.string().optional(),
   /** Lienzo que se abre por defecto. */
   defaultView: Id.optional(),
+  /**
+   * C4 estricto: avisa cuando un lienzo mezcla niveles (un componente en un lienzo de contexto).
+   * Por defecto está apagado: cada lienzo puede mostrar lo que haga falta.
+   */
+  strictC4: z.boolean().optional(),
   environments: z.array(Environment).optional(),
   finops: FinOpsSettings.optional(),
   extensions: Extensions.optional(),

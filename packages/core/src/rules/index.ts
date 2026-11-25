@@ -1,5 +1,5 @@
 import { ancestorsOf, hasParentCycle, indexOf, sortedValues, type Model } from '../model/index.ts';
-import { INSTANCE_OF_KINDS, type Element, type FlowStep, type Id, type LeafStep, type View } from '../schema/index.ts';
+import { DEPLOYMENT_KINDS, INSTANCE_OF_KINDS, type Element, type FlowStep, type Id, type LeafStep, type View } from '../schema/index.ts';
 import {
   KINDS_FOR_LEVEL,
   PARENT_KINDS,
@@ -22,10 +22,17 @@ export interface Diagnostic {
   file?: string;
 }
 
-/** ¿Se puede ubicar este elemento en este lienzo? Devuelve el motivo si no. */
+/**
+ * ¿Se puede ubicar este elemento en este lienzo? Devuelve el motivo si no. Un lienzo C4 acepta
+ * cualquier elemento del modelo lógico (el nivel no lo limita: ver `levelMismatch`); el despliegue
+ * tiene sus propios tipos.
+ */
 export function placementProblem(model: Model, view: View, el: Element): string | null {
-  if (!KINDS_FOR_LEVEL[view.level].includes(el.kind)) {
-    return `Un ${el.kind} no se puede ubicar en un lienzo de nivel ${view.level}`;
+  const deploymentKind = (DEPLOYMENT_KINDS as readonly string[]).includes(el.kind);
+  if (view.level === 'deployment') {
+    if (!KINDS_FOR_LEVEL.deployment.includes(el.kind)) return `Un ${el.kind} no se puede ubicar directo en un lienzo de despliegue: se despliega como instancia`;
+  } else if (deploymentKind) {
+    return `Un ${el.kind} no se puede ubicar en un lienzo ${levelLabel(view.level)}: va en uno de despliegue`;
   }
   if (view.scope && el.id === view.scope) {
     return 'El elemento abierto ya es el marco del lienzo';
@@ -37,6 +44,15 @@ export function placementProblem(model: Model, view: View, el: Element): string 
     return `"${el.name}" no está desplegado en el ambiente de este lienzo`;
   }
   return null;
+}
+
+/**
+ * C4 estricto: el elemento no es del nivel del lienzo (un componente en un lienzo de contexto).
+ * No impide nada; es un aviso para quien quiere un lienzo por nivel.
+ */
+export function levelMismatch(view: View, el: Element): string | null {
+  if (view.level === 'deployment' || KINDS_FOR_LEVEL[view.level].includes(el.kind)) return null;
+  return `Un ${el.kind} no es del nivel de un lienzo ${levelLabel(view.level)}`;
 }
 
 /** Elementos candidatos para agregar a un lienzo (los que todavía no están en él). */
@@ -146,6 +162,10 @@ export function validateModel(model: Model): Diagnostic[] {
       }
       const problem = placementProblem(model, view, el);
       if (problem) out.push({ severity: 'warning', code: 'invalid-placement', message: `${problem} ("${el.name}" en "${view.name}")`, entity });
+      else if (model.workspace.strictC4) {
+        const mismatch = levelMismatch(view, el);
+        if (mismatch) out.push({ severity: 'warning', code: 'level-mix', message: `${mismatch} ("${el.name}" en "${view.name}")`, entity });
+      }
     }
   }
 

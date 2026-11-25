@@ -8,6 +8,7 @@ export * from './catalog/index.ts';
 export * from './merge/index.ts';
 export * from './layout/index.ts';
 export * from './layout/elk.ts';
+export * from './layout/expand.ts';
 export * from './demo.ts';
 export * from './analysis/index.ts';
 export * from './export/index.ts';

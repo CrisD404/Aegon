@@ -4,7 +4,7 @@ import { loadPrefs, savePrefs } from '../lib/persist.ts';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 export type GridMode = 'dots' | 'lines' | 'none';
-export type RightTab = 'inspector' | 'changes' | 'costs' | 'comments';
+export type RightTab = 'inspector' | 'changes' | 'costs' | 'comments' | 'health';
 export type SidebarTab = 'model' | 'groups' | 'views' | 'flows';
 
 /** Ubicación de un paso: `[i]` en el flujo o `[i, camino, j]` dentro de una bifurcación. */
@@ -65,6 +65,8 @@ export interface GhostState {
   connectFrom?: Id;
   /** Tipo sugerido (botones "agregar" de la toolbar). */
   kind?: ElementKind;
+  /** Elemento abierto en el lugar donde cae el punto: lo nuevo se crea adentro. */
+  inside?: Id;
 }
 
 export interface Toast {

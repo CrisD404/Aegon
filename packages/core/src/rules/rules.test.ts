@@ -35,14 +35,15 @@ describe('validateModel', () => {
 });
 
 describe('placement', () => {
-  it('respeta los tipos por nivel y no permite ubicar el scope', () => {
+  it('el nivel no limita qué se ubica, pero el scope y sus ancestros no entran', () => {
     const model = sampleModel();
     const l1 = model.views.landscape!;
     const l2 = model.views['banking-containers']!;
-    expect(placementProblem(model, l1, model.elements.api!)).not.toBeNull();
+    // Un lienzo de contexto acepta un contenedor (se puede abrir un sistema en el lugar).
+    expect(placementProblem(model, l1, model.elements.api!)).toBeNull();
     expect(placementProblem(model, l2, model.elements.banking!)).not.toBeNull();
     expect(placementProblem(model, l2, model.elements.customer!)).toBeNull();
-    expect(placeableElements(model, l2).map((e) => e.id)).toEqual(['aws', 'core-gw', 'customer']);
+    expect(placeableElements(model, l2).map((e) => e.id)).toEqual(['accounts', 'aws', 'core-gw', 'customer']);
   });
 });
 

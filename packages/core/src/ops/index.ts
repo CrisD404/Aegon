@@ -26,7 +26,7 @@ export type ElementPatch = Patch<DistributiveOmit<Element, 'id' | 'kind'>> & {
   [key: string]: unknown;
 };
 export type RelationPatch = Patch<Omit<Relation, 'id'>>;
-export type ViewPatch = Patch<Pick<View, 'name' | 'description' | 'environment' | 'scope' | 'extensions'>>;
+export type ViewPatch = Patch<Pick<View, 'name' | 'description' | 'environment' | 'scope' | 'expanded' | 'folded' | 'extensions'>>;
 export type WorkspacePatch = Patch<Omit<WorkspaceMeta, 'schema' | 'id'>>;
 export type FlowPatch = Patch<Omit<Flow, 'id'>>;
 export type CommentPatch = Patch<Omit<Comment, 'id'>>;
@@ -270,6 +270,26 @@ function removeElement(model: Model, id: Id): ApplyResult {
     steps.push({ type: 'view.unplace', view: v, ids });
   }
 
+  // Lo que los lienzos recordaban de estos elementos: cuáles estaban abiertos y cómo se veían adentro.
+  for (const view of Object.values(model.views).sort((a, b) => a.id.localeCompare(b.id))) {
+    if (removedViews.has(view.id) || (!view.expanded && !view.folded)) continue;
+    const patch: ViewPatch = {};
+    if (view.expanded?.some((e) => targetSet.has(e))) {
+      const expanded = view.expanded.filter((e) => !targetSet.has(e));
+      patch.expanded = expanded.length ? expanded : null;
+    }
+    if (view.folded && Object.entries(view.folded).some(([owner, inner]) => targetSet.has(owner) || Object.keys(inner).some((n) => targetSet.has(n)))) {
+      const folded: NonNullable<View['folded']> = {};
+      for (const [owner, inner] of Object.entries(view.folded)) {
+        if (targetSet.has(owner)) continue;
+        const kept = Object.fromEntries(Object.entries(inner).filter(([n]) => !targetSet.has(n)));
+        if (Object.keys(kept).length) folded[owner] = kept;
+      }
+      patch.folded = Object.keys(folded).length ? folded : null;
+    }
+    if (Object.keys(patch).length) steps.push({ type: 'view.update', id: view.id, patch });
+  }
+
   for (const t of targets) {
     for (const member of idx.membersOf.get(t) ?? []) {
       if (targetSet.has(member)) continue;
@@ -406,7 +426,7 @@ function addView(model: Model, input: View): ApplyResult {
 function updateView(model: Model, id: Id, patch: ViewPatch): ApplyResult {
   const current = getView(model, id);
   for (const key of Object.keys(patch)) {
-    if (!['name', 'description', 'environment', 'scope', 'extensions'].includes(key)) {
+    if (!['name', 'description', 'environment', 'scope', 'expanded', 'folded', 'extensions'].includes(key)) {
       throw new OpError('immutable-field', `"${key}" no se puede cambiar con view.update`);
     }
     // El elemento abierto define un L2/L3; en despliegue es solo un filtro y se puede cambiar.
