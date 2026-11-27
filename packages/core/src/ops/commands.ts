@@ -3,13 +3,15 @@ import {
   ancestorsOf,
   childViewOf,
   childrenOf,
+  descendantsOf,
   indexOf,
   type Model,
 } from '../model/index.ts';
-import type { Element, ElementKind, Id, Level, NodeLayout, Relation, View } from '../schema/index.ts';
+import type { EdgeStyle, Element, ElementKind, FlowStep, Id, LeafStep, Level, NodeLayout, Relation, View } from '../schema/index.ts';
 import { childLevelOf } from '../rules/hierarchy.ts';
-import { projectedEdges } from '../deployment/index.ts';
-import type { Op } from './index.ts';
+import { instancesOf, projectedEdges } from '../deployment/index.ts';
+import { relationBack, relationBackWith } from '../catalog/index.ts';
+import type { Op, RelationPatch } from './index.ts';
 
 /**
  * Comandos de alto nivel: generan `Op`s listas para aplicar (con IDs y defaults resueltos).
@@ -112,6 +114,18 @@ export function sizeOf(el: Pick<Element, 'kind'> & { addresses?: readonly string
   const w = layout?.w ?? def.w;
   const extra = el.kind === 'infra' || el.kind === 'instance' ? addressRows(networkLabels(el), w).length * ADDRESS_ROW_HEIGHT : 0;
   return { w, h: layout?.h ?? def.h + extra };
+}
+
+/**
+ * Cambio que invierte una relación: el origen pasa a ser el destino. Si es bidireccional y declara
+ * su vuelta, la ida y la vuelta se intercambian, así cada protocolo sigue apuntando a quien escucha.
+ */
+export function invertRelationPatch(rel: Relation): RelationPatch {
+  const patch: RelationPatch = { from: rel.to, to: rel.from };
+  const back = relationBack(rel);
+  if (!back) return patch;
+  const forward = relationBackWith(undefined, { label: rel.label ?? null, protocols: rel.protocols ?? null, ports: rel.ports ?? null });
+  return { ...patch, label: back.label ?? null, protocols: back.protocols ?? null, ports: back.ports ?? null, back: forward };
 }
 
 const isElementTaken = (model: Model) => (id: Id) => !!model.elements[id];
@@ -298,6 +312,100 @@ function gridLayout(ids: Id[], model: Model, origin: { x: number; y: number }, c
   return nodes;
 }
 
+/**
+ * Estilo de una relación en un lienzo con un cambio aplicado (`null` en un campo lo quita). Devuelve
+ * `null` cuando queda todo en el default, que es como se guarda: sin entrada en `edges`.
+ */
+export function edgeStyleWith(view: View, relation: Id, patch: { [K in keyof EdgeStyle]?: EdgeStyle[K] | null }): EdgeStyle | null {
+  const next: EdgeStyle = { ...view.edges?.[relation] };
+  for (const [key, value] of Object.entries(patch) as [keyof EdgeStyle, unknown][]) {
+    if (value === null || value === undefined) delete next[key];
+    else (next as Record<string, unknown>)[key] = value;
+  }
+  if (next.shape === 'curved') delete next.shape;
+  if (next.hidden === false) delete next.hidden;
+  if (!next.points?.length) delete next.points;
+  // El medio del lado es el default: no se escribe.
+  for (const end of ['from', 'to'] as const) {
+    const anchor = next[end];
+    if (anchor && (anchor.at === undefined || Math.abs(anchor.at - 0.5) < 0.001)) next[end] = { side: anchor.side };
+  }
+  return Object.keys(next).length ? next : null;
+}
+
+/** ¿La flecha está acomodada a mano en este lienzo (recorrido, alguna punta fija o su etiqueta movida)? */
+export function hasManualRoute(style: EdgeStyle | undefined): boolean {
+  return !!style && (!!style.points?.length || !!style.from || !!style.to || style.labelAt !== undefined || style.backLabelAt !== undefined);
+}
+
+/** El estilo sin nada acomodado a mano: la flecha vuelve a trazarse sola y su etiqueta, a ubicarse sola. */
+export const AUTO_ROUTE = { points: null, from: null, to: null, labelAt: null, backLabelAt: null } as const;
+
+export type ReconnectResult = { op: Op; target: Id } | { problem: string } | null;
+
+/**
+ * Lleva un extremo de una relación a otro elemento: la flecha "se muda" y conserva su ID, etiqueta,
+ * protocolos y puertos. Respeta la regla de una relación por par. En los lienzos vuelve a trazarse
+ * sola (lo acomodado a mano era para el recorrido anterior, salvo la punta que no se movió) y los
+ * pasos de flujos que la usan siguen al extremo nuevo. `null` si no hay nada que cambiar.
+ */
+export function reconnectOp(model: Model, relationId: Id, end: 'from' | 'to', target: Id): ReconnectResult {
+  const rel = model.relations[relationId];
+  const el = model.elements[target];
+  if (!rel || !el) return null;
+  const previous = rel[end];
+  if (previous === target) return null;
+  const other = end === 'from' ? rel.to : rel.from;
+  if (other === target) return { problem: 'Una relación necesita dos extremos distintos' };
+  if (el.kind === 'group') return { problem: 'Un grupo no se conecta: la relación va con lo que tiene adentro' };
+  const existing = relationBetween(model, target, other);
+  if (existing && existing.id !== rel.id) return { problem: `«${el.name}» y «${model.elements[other]?.name ?? other}» ya están conectados` };
+
+  const ops: Op[] = [{ type: 'relation.update', id: rel.id, patch: end === 'from' ? { from: target } : { to: target } }];
+  for (const view of Object.values(model.views)) {
+    const style = view.edges?.[rel.id];
+    if (style && (style.points?.length || style[end])) ops.push({ type: 'view.edge', view: view.id, relation: rel.id, style: edgeStyleWith(view, rel.id, { points: null, [end]: null }) });
+  }
+  // Los mensajes de flujos que van por esta relación apuntan al extremo nuevo.
+  const leaf = <T extends LeafStep | FlowStep>(step: T): T => {
+    if (step.type !== 'message' || step.relation !== rel.id) return step;
+    return { ...step, from: step.from === previous ? target : step.from, to: step.to === previous ? target : step.to };
+  };
+  for (const flow of Object.values(model.flows ?? {})) {
+    let changed = false;
+    const steps = flow.steps.map((step) => {
+      const next: FlowStep = step.type === 'paths' ? { ...step, paths: step.paths.map((p) => ({ ...p, steps: p.steps.map(leaf) })) } : leaf(step);
+      if (JSON.stringify(next) !== JSON.stringify(step)) changed = true;
+      return next;
+    });
+    if (changed) ops.push({ type: 'flow.update', id: flow.id, patch: { steps } });
+  }
+  return { op: { type: 'batch', ops, label: `Llevar la flecha a ${el.name}` }, target };
+}
+
+/** El mismo estilo con el recorrido a mano corrido (cuando lo que une se mueve entero). */
+export function shiftEdgeStyle(style: EdgeStyle, dx: number, dy: number): EdgeStyle {
+  if (!style.points?.length || (!dx && !dy)) return style;
+  return { ...style, points: style.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+}
+
+/**
+ * Quita lo acomodado a mano (recorrido y puntas fijas) de las relaciones que tocan lo que se
+ * reordenó: era para donde estaban los nodos. Sin `moved`, las de todo el lienzo.
+ */
+export function routeResetOps(model: Model, view: View, moved?: ReadonlySet<Id>): Op[] {
+  const ops: Op[] = [];
+  for (const [id, style] of Object.entries(view.edges ?? {})) {
+    if (!hasManualRoute(style)) continue;
+    const rel = model.relations[id];
+    // Si un extremo no está ubicado tal cual (se dibuja entre sus instancias), se quita por las dudas.
+    const direct = !!rel && !!view.nodes[rel.from] && !!view.nodes[rel.to];
+    if (moved && direct && !moved.has(rel.from) && !moved.has(rel.to)) continue;
+    ops.push({ type: 'view.edge', view: view.id, relation: id, style: edgeStyleWith(view, id, AUTO_ROUTE) });
+  }
+  return ops;
+}
+
 export function childViewName(el: Element): string {
   return el.kind === 'system' ? `${el.name} · Contenedores` : `${el.name} · Componentes`;
 }
@@ -372,16 +480,39 @@ export function duplicateOp(
   const mapping = new Map<Id, Id>();
   const ops: Op[] = [];
   const nodes: Record<Id, NodeLayout> = {};
-  for (const id of ids) {
-    const el = model.elements[id];
-    if (!el || el.kind === 'group') continue;
-    const name = `${el.name} (copia)`;
-    const newId = idFromName(name, (x) => taken.has(x), el.kind);
+  // Un nodo de despliegue se duplica con lo que tiene adentro en el lienzo (sus instancias, su
+  // infraestructura, otros nodos): la copia de un servidor es un servidor completo.
+  const roots = ids.filter((id) => model.elements[id] && model.elements[id]!.kind !== 'group');
+  const all = new Set<Id>(roots);
+  for (const id of roots) {
+    if (model.elements[id]!.kind !== 'node') continue;
+    for (const d of descendantsOf(model, id)) if (view?.nodes[d]) all.add(d);
+  }
+  const depthOf = (id: Id) => ancestorsOf(model, id).length;
+  const ordered = [...all].sort((a, b) => depthOf(a) - depthOf(b));
+  // Los marcos copiados van al costado del original (encima lo taparían); el resto, apenas corrido.
+  let shift = offset;
+  if (view && roots.some((id) => model.elements[id]!.kind === 'node')) {
+    const rects = roots.filter((id) => view.nodes[id]).map((id) => ({ ...view.nodes[id]!, ...sizeOf(model.elements[id]!, view.nodes[id]) }));
+    if (rects.length) {
+      const left = Math.min(...rects.map((r) => r.x));
+      const right = Math.max(...rects.map((r) => r.x + r.w));
+      shift = { x: right - left + offset.x, y: 0 };
+    }
+  }
+  for (const id of ordered) {
+    const el = model.elements[id]!;
+    const name = roots.includes(id) ? `${el.name} (copia)` : el.name;
+    const newId = idFromName(`${el.name} (copia)`, (x) => taken.has(x), el.kind);
     taken.add(newId);
     mapping.set(id, newId);
-    ops.push({ type: 'element.add', element: { ...el, id: newId, name } as Element });
+    const copy = { ...el, id: newId, name } as Element;
+    // Lo que estaba dentro de algo copiado queda dentro de la copia, no del original.
+    const parent = el.parent ? mapping.get(el.parent) : undefined;
+    if (parent) (copy as { parent?: Id }).parent = parent;
+    ops.push({ type: 'element.add', element: copy });
     const layout = view?.nodes[id];
-    if (layout) nodes[newId] = { ...layout, x: layout.x + offset.x, y: layout.y + offset.y };
+    if (layout) nodes[newId] = { ...layout, x: layout.x + shift.x, y: layout.y + shift.y };
   }
   const relTaken = new Set(Object.keys(model.relations));
   for (const rel of Object.values(model.relations)) {
@@ -394,6 +525,22 @@ export function duplicateOp(
   }
   if (view && Object.keys(nodes).length) ops.push({ type: 'view.place', view: view.id, nodes });
   return { op: { type: 'batch', ops, label: 'Duplicar' }, ids: [...mapping.values()] };
+}
+
+/**
+ * ¿El elemento vive solo en este lienzo? Es así cuando ni él ni lo que contiene están ubicados en
+ * otro lienzo, nada suyo tiene un lienzo de detalle con contenido y nadie lo despliega. Sacarlo
+ * de acá lo dejaría huérfano en el modelo, así que quien lo borra del lienzo quiere borrarlo.
+ */
+export function livesOnlyIn(model: Model, viewId: Id, id: Id): boolean {
+  if (!model.elements[id]) return false;
+  const idx = indexOf(model);
+  for (const x of [id, ...descendantsOf(model, id)]) {
+    if ((idx.viewsContaining.get(x) ?? []).some((v) => v !== viewId)) return false;
+    if ((idx.viewsByScope.get(x) ?? []).some((v) => Object.keys(model.views[v]?.nodes ?? {}).length > 0)) return false;
+    if (model.elements[x]!.kind !== 'instance' && instancesOf(model, x).length) return false;
+  }
+  return true;
 }
 
 /** Crea un lienzo vacío con nombre único (L1 por defecto; en despliegue, para un ambiente). */

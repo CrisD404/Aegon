@@ -1,6 +1,6 @@
 import { ancestorsOf, sortedValues, type Model } from '../model/index.ts';
 import type { Element, Id, Relation, View } from '../schema/index.ts';
-import { findBroker, findEngine, findTechnology, relationTechnology } from '../catalog/index.ts';
+import { findBroker, findEngine, findTechnology, relationTechnologyBothWays } from '../catalog/index.ts';
 import { OpError } from '../ops/index.ts';
 import { levelRank } from '../rules/hierarchy.ts';
 import type { ViewEdge } from '../ops/commands.ts';
@@ -42,7 +42,7 @@ export function techText(el: Element): string {
 }
 
 export function protocolsText(relations: readonly Relation[]): string {
-  return [...new Set(relations.map((r) => relationTechnology(r)).filter(Boolean))].join(', ');
+  return [...new Set(relations.map((r) => relationTechnologyBothWays(r)).filter(Boolean))].join(', ');
 }
 
 /** Etiqueta de una relación del lienzo; las implícitas resumen las relaciones que agrupan. */

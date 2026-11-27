@@ -6,6 +6,8 @@ import type {
   GroupProvider,
   InfraType,
   NodeType,
+  ProtocolUse,
+  RelationBack,
   Risk,
   Status,
   StoreType,
@@ -190,6 +192,13 @@ export const TECHNOLOGIES: readonly Technology[] = [
   { id: 'envoy', name: 'Envoy', icon: 'envoyproxy', category: 'infrastructure', keywords: ['proxy', 'mesh'] },
   { id: 'cloudflare', name: 'Cloudflare', icon: 'cloudflare', category: 'infrastructure', keywords: ['cdn', 'dns', 'waf'] },
   { id: 'apim', name: 'API Manager', icon: 'glyph:network', category: 'infrastructure', keywords: ['apim', 'gateway', 'api gateway'] },
+  { id: 'active-directory', name: 'Active Directory', icon: 'glyph:server', category: 'infrastructure', keywords: ['ad', 'ad ds', 'directorio activo', 'controlador de dominio', 'domain controller', 'dominio', 'ldap', 'kerberos', 'microsoft'] },
+  { id: 'dns-server', name: 'DNS', icon: 'glyph:network', category: 'infrastructure', keywords: ['servidor dns', 'bind', 'named', 'resolver', 'nombres', 'unbound', 'windows dns'] },
+  { id: 'ntp-server', name: 'NTP', icon: 'glyph:network', category: 'infrastructure', keywords: ['servidor ntp', 'hora', 'time', 'chrony', 'reloj', 'w32time'] },
+  { id: 'dhcp-server', name: 'DHCP', icon: 'glyph:network', category: 'infrastructure', keywords: ['servidor dhcp', 'direcciones'] },
+  { id: 'file-server', name: 'Servidor de archivos', icon: 'glyph:file', category: 'infrastructure', keywords: ['file server', 'smb', 'nfs', 'nas', 'carpetas compartidas'] },
+  { id: 'iis', name: 'IIS', icon: 'glyph:globe', category: 'platform', keywords: ['internet information services', 'windows', 'web server'] },
+  { id: 'hyper-v', name: 'Hyper-V', icon: 'glyph:server', category: 'platform', keywords: ['hyperv', 'virtualización', 'vm', 'microsoft'] },
   { id: 'entra-id', name: 'Microsoft Entra ID', icon: 'glyph:plug', category: 'saas', keywords: ['azure ad', 'aad', 'sso', 'microsoft'] },
   { id: 'keycloak', name: 'Keycloak', icon: 'keycloak', category: 'saas', keywords: ['iam', 'sso'] },
   { id: 'auth0', name: 'Auth0', icon: 'auth0', category: 'saas' },
@@ -218,6 +227,8 @@ export const PROTOCOL_GROUP_LABEL: Readonly<Record<ProtocolGroup, string>> = {
 
 export interface Protocol extends CatalogItem {
   group: ProtocolGroup;
+  /** Puerto de destino habitual (`443` para HTTPS, `53` para DNS), si tiene uno. */
+  port?: number;
   /** Destinos para los que el protocolo es la opción natural (ordena las sugerencias). */
   fits?: {
     kinds?: readonly ElementKind[];
@@ -233,7 +244,7 @@ const API_TARGETS = { kinds: ['system', 'container', 'component'] as ElementKind
 /** Ordenados por grupo y, dentro de cada grupo, de más a menos habitual. */
 export const PROTOCOLS: readonly Protocol[] = [
   // Web y APIs
-  { id: 'https', name: 'HTTPS', icon: 'glyph:globe', group: 'web', fits: API_TARGETS, keywords: ['http', 'tls'] },
+  { id: 'https', port: 443, name: 'HTTPS', icon: 'glyph:globe', group: 'web', fits: API_TARGETS, keywords: ['http', 'tls'] },
   { id: 'rest', name: 'REST/JSON', icon: 'glyph:globe', group: 'web', fits: API_TARGETS, keywords: ['json', 'http'] },
   { id: 'grpc', name: 'gRPC', icon: 'glyph:plug', group: 'web', fits: { containerTypes: ['api', 'service'] }, keywords: ['protobuf'] },
   { id: 'graphql', name: 'GraphQL', icon: 'graphql', group: 'web', fits: { containerTypes: ['api', 'web'] } },
@@ -241,49 +252,55 @@ export const PROTOCOLS: readonly Protocol[] = [
   { id: 'sse', name: 'Server-Sent Events', icon: 'glyph:plug', group: 'web', keywords: ['sse', 'stream'] },
   { id: 'soap', name: 'SOAP/XML', icon: 'glyph:file', group: 'web', keywords: ['xml', 'wsdl'] },
   { id: 'webhook', name: 'Webhook', icon: 'glyph:plug', group: 'web', keywords: ['callback'] },
-  { id: 'http', name: 'HTTP (sin TLS)', icon: 'glyph:globe', group: 'web' },
+  { id: 'http', port: 80, name: 'HTTP (sin TLS)', icon: 'glyph:globe', group: 'web' },
   // Mensajería
-  { id: 'kafka', name: 'Kafka', icon: 'apachekafka', group: 'messaging', fits: { brokers: ['kafka', 'event-hubs'] } },
-  { id: 'amqp', name: 'AMQP', icon: 'rabbitmq', group: 'messaging', fits: { brokers: ['rabbitmq', 'service-bus', 'activemq'] } },
+  { id: 'kafka', port: 9092, name: 'Kafka', icon: 'apachekafka', group: 'messaging', fits: { brokers: ['kafka', 'event-hubs'] } },
+  { id: 'amqp', port: 5672, name: 'AMQP', icon: 'rabbitmq', group: 'messaging', fits: { brokers: ['rabbitmq', 'service-bus', 'activemq'] } },
   { id: 'jms', name: 'JMS', icon: 'glyph:queue', group: 'messaging', fits: { brokers: ['activemq', 'ibm-mq'] } },
-  { id: 'mqtt', name: 'MQTT', icon: 'glyph:queue', group: 'messaging', fits: { brokers: ['mosquitto'] }, keywords: ['iot'] },
-  { id: 'nats', name: 'NATS', icon: 'natsdotio', group: 'messaging', fits: { brokers: ['nats'] } },
-  { id: 'pulsar', name: 'Pulsar', icon: 'apachepulsar', group: 'messaging', fits: { brokers: ['pulsar'] } },
-  { id: 'stomp', name: 'STOMP', icon: 'glyph:queue', group: 'messaging', fits: { brokers: ['activemq', 'rabbitmq'] } },
+  { id: 'mqtt', port: 1883, name: 'MQTT', icon: 'glyph:queue', group: 'messaging', fits: { brokers: ['mosquitto'] }, keywords: ['iot'] },
+  { id: 'nats', port: 4222, name: 'NATS', icon: 'natsdotio', group: 'messaging', fits: { brokers: ['nats'] } },
+  { id: 'pulsar', port: 6650, name: 'Pulsar', icon: 'apachepulsar', group: 'messaging', fits: { brokers: ['pulsar'] } },
+  { id: 'stomp', port: 61613, name: 'STOMP', icon: 'glyph:queue', group: 'messaging', fits: { brokers: ['activemq', 'rabbitmq'] } },
   // Acceso a datos
   { id: 'jdbc', name: 'JDBC', icon: 'glyph:database', group: 'data', fits: { storeTypes: ['relational', 'warehouse', 'time-series'] } },
   { id: 'sql', name: 'SQL (driver nativo)', icon: 'glyph:database', group: 'data', fits: { storeTypes: ['relational', 'warehouse', 'time-series'] }, keywords: ['tcp', 'postgres', 'mysql'] },
   { id: 'odbc', name: 'ODBC', icon: 'glyph:database', group: 'data', fits: { storeTypes: ['relational', 'warehouse'] } },
-  { id: 'mongodb-wire', name: 'MongoDB Wire', icon: 'mongodb', group: 'data', fits: { engines: ['mongodb', 'cosmosdb'] } },
-  { id: 'resp', name: 'Redis (RESP)', icon: 'redis', group: 'data', fits: { engines: ['redis'] } },
-  { id: 'memcached', name: 'Memcached', icon: 'memcached', group: 'data', fits: { engines: ['memcached'] } },
-  { id: 'cql', name: 'CQL', icon: 'apachecassandra', group: 'data', fits: { engines: ['cassandra'] } },
-  { id: 'bolt', name: 'Bolt', icon: 'neo4j', group: 'data', fits: { engines: ['neo4j'] } },
+  { id: 'mongodb-wire', port: 27017, name: 'MongoDB Wire', icon: 'mongodb', group: 'data', fits: { engines: ['mongodb', 'cosmosdb'] } },
+  { id: 'resp', port: 6379, name: 'Redis (RESP)', icon: 'redis', group: 'data', fits: { engines: ['redis'] } },
+  { id: 'memcached', port: 11211, name: 'Memcached', icon: 'memcached', group: 'data', fits: { engines: ['memcached'] } },
+  { id: 'cql', port: 9042, name: 'CQL', icon: 'apachecassandra', group: 'data', fits: { engines: ['cassandra'] } },
+  { id: 'bolt', port: 7687, name: 'Bolt', icon: 'neo4j', group: 'data', fits: { engines: ['neo4j'] } },
   { id: 's3-api', name: 'S3 API', icon: 'amazons3', group: 'data', fits: { storeTypes: ['object'] } },
   { id: 'search-api', name: 'API de búsqueda', icon: 'elasticsearch', group: 'data', fits: { storeTypes: ['search'] } },
   { id: 'dynamodb-api', name: 'DynamoDB API', icon: 'amazondynamodb', group: 'data', fits: { engines: ['dynamodb'] } },
   // Archivos
-  { id: 'sftp', name: 'SFTP', icon: 'glyph:file', group: 'files', keywords: ['ssh'] },
-  { id: 'ftps', name: 'FTP/FTPS', icon: 'glyph:file', group: 'files' },
-  { id: 'smb', name: 'SMB/CIFS', icon: 'glyph:file', group: 'files' },
-  { id: 'nfs', name: 'NFS', icon: 'glyph:file', group: 'files' },
+  { id: 'sftp', port: 22, name: 'SFTP', icon: 'glyph:file', group: 'files', keywords: ['ssh'] },
+  { id: 'ftps', port: 21, name: 'FTP/FTPS', icon: 'glyph:file', group: 'files' },
+  { id: 'smb', port: 445, name: 'SMB/CIFS', icon: 'glyph:file', group: 'files' },
+  { id: 'nfs', port: 2049, name: 'NFS', icon: 'glyph:file', group: 'files' },
   // Identidad
   { id: 'oauth2', name: 'OAuth 2.0', icon: 'glyph:plug', group: 'identity', keywords: ['token'] },
   { id: 'oidc', name: 'OpenID Connect', icon: 'openid', group: 'identity', keywords: ['sso'] },
   { id: 'saml', name: 'SAML 2.0', icon: 'glyph:plug', group: 'identity', keywords: ['sso'] },
-  { id: 'ldap', name: 'LDAP', icon: 'glyph:server', group: 'identity', keywords: ['active directory'] },
-  { id: 'kerberos', name: 'Kerberos', icon: 'glyph:server', group: 'identity' },
+  { id: 'ldap', port: 389, name: 'LDAP', icon: 'glyph:server', group: 'identity', keywords: ['active directory'] },
+  { id: 'kerberos', port: 88, name: 'Kerberos', icon: 'glyph:server', group: 'identity' },
   // Correo
-  { id: 'smtp', name: 'SMTP', icon: 'glyph:mail', group: 'email' },
-  { id: 'imap', name: 'IMAP', icon: 'glyph:mail', group: 'email' },
+  { id: 'smtp', port: 25, name: 'SMTP', icon: 'glyph:mail', group: 'email' },
+  { id: 'imap', port: 143, name: 'IMAP', icon: 'glyph:mail', group: 'email' },
   // Red
   { id: 'tcp', name: 'TCP', icon: 'glyph:network', group: 'network' },
   { id: 'udp', name: 'UDP', icon: 'glyph:network', group: 'network' },
-  { id: 'ssh', name: 'SSH', icon: 'glyph:server', group: 'network' },
-  { id: 'dns', name: 'DNS', icon: 'glyph:network', group: 'network' },
+  { id: 'ssh', port: 22, name: 'SSH', icon: 'glyph:server', group: 'network' },
+  { id: 'dns', port: 53, name: 'DNS', icon: 'glyph:network', group: 'network', keywords: ['53', 'nombres'] },
+  { id: 'ntp', port: 123, name: 'NTP', icon: 'glyph:network', group: 'network', keywords: ['123', 'hora', 'time'] },
+  { id: 'dhcp', port: 67, name: 'DHCP', icon: 'glyph:network', group: 'network', keywords: ['67', '68'] },
+  { id: 'rdp', port: 3389, name: 'RDP', icon: 'glyph:server', group: 'network', keywords: ['3389', 'escritorio remoto'] },
+  { id: 'icmp', name: 'ICMP', icon: 'glyph:network', group: 'network', keywords: ['ping'] },
+  { id: 'snmp', port: 161, name: 'SNMP', icon: 'glyph:network', group: 'network', keywords: ['161', 'monitoreo'] },
+  { id: 'syslog', port: 514, name: 'Syslog', icon: 'glyph:file', group: 'network', keywords: ['514', 'logs'] },
   { id: 'vpn', name: 'VPN/IPsec', icon: 'glyph:network', group: 'network' },
-  { id: 'bgp', name: 'BGP', icon: 'glyph:network', group: 'network', keywords: ['ebgp', 'ibgp', 'ruteo'] },
-  { id: 'tds', name: 'TDS (SQL Server)', icon: 'glyph:database', group: 'data', fits: { engines: ['sqlserver'] }, keywords: ['sql server', 'mssql', '1433'] },
+  { id: 'bgp', port: 179, name: 'BGP', icon: 'glyph:network', group: 'network', keywords: ['ebgp', 'ibgp', 'ruteo'] },
+  { id: 'tds', port: 1433, name: 'TDS (SQL Server)', icon: 'glyph:database', group: 'data', fits: { engines: ['sqlserver'] }, keywords: ['sql server', 'mssql', '1433'] },
 ];
 
 /** Qué grupos de protocolos son naturales según el tipo de destino (de más a menos). */
@@ -423,9 +440,28 @@ export const BUS_TYPE_LABEL: Readonly<Record<BusType, string>> = {
 };
 
 export const STATUS_LABEL: Readonly<Record<Status, string>> = {
-  planned: 'Planificado',
-  live: 'Productivo',
-  deprecated: 'Deprecado',
+  planned: 'Nuevo',
+  live: 'Existente',
+  changing: 'Se modifica',
+  deprecated: 'Se da de baja',
+  retired: 'Retirado',
+};
+
+/** Qué significa cada estado, en una línea (menús y leyendas). */
+export const STATUS_HINT: Readonly<Record<Status, string>> = {
+  planned: 'Todavía no existe',
+  live: 'Ya está y no cambia',
+  changing: 'Ya está y cambia',
+  deprecated: 'Está y se va a quitar',
+  retired: 'Ya no está',
+};
+
+/** Marca corta que lleva el nodo en el lienzo. `live` no lleva ninguna. */
+export const STATUS_MARK: Readonly<Record<Status, string>> = {
+  planned: 'Nuevo',
+  live: '',
+  changing: 'Se modifica',
+  deprecated: 'Baja',
   retired: 'Retirado',
 };
 
@@ -457,11 +493,132 @@ export function findProtocol(id: string): Protocol | undefined {
   return protocolById.get(id.toLowerCase());
 }
 
-/** Protocolos y puertos de una relación: "HTTPS :443, :80", "TCP :443", ":1433". */
-export function relationTechnology(rel: { protocols?: readonly string[]; ports?: readonly number[] }): string {
-  const protocols = (rel.protocols ?? []).map((p) => findProtocol(p)?.name ?? p).join(', ');
-  const ports = (rel.ports ?? []).map((p) => `:${p}`).join(', ');
-  return [protocols, ports].filter(Boolean).join(' ');
+type ProtocolEntry = string | ProtocolUse;
+type WithProtocols = { protocols?: readonly ProtocolEntry[]; ports?: readonly number[] };
+
+/** Un protocolo de una relación con sus puertos de destino. Sin `id`: puertos que no tienen protocolo. */
+export interface RelationChannel {
+  id?: string;
+  ports: number[];
+}
+
+/** IDs de los protocolos de una relación, sin sus puertos. */
+export function protocolIds(rel: Pick<WithProtocols, 'protocols'>): string[] {
+  return (rel.protocols ?? []).map((p) => (typeof p === 'string' ? p : p.id));
+}
+
+/**
+ * Protocolos de una relación, cada uno con sus puertos. Los puertos sueltos (`ports`) se asignan
+ * cuando no hay duda: si la relación tiene un solo protocolo son suyos y, si tiene varios, cada
+ * puerto va con el protocolo que lo usa habitualmente (53 con DNS, 123 con NTP). Lo que no se
+ * puede asignar queda al final, sin protocolo.
+ */
+export function relationChannels(rel: WithProtocols): RelationChannel[] {
+  const entries = rel.protocols ?? [];
+  const channels: RelationChannel[] = entries.map((p) => (typeof p === 'string' ? { id: p, ports: [] } : { id: p.id, ports: [...p.ports] }));
+  const plain = channels.filter((_, i) => typeof entries[i] === 'string');
+  let loose = [...new Set(rel.ports ?? [])];
+  if (channels.length === 1 && plain.length === 1) {
+    plain[0]!.ports = loose;
+    loose = [];
+  } else {
+    loose = loose.filter((port) => {
+      const owner = plain.find((c) => findProtocol(c.id!)?.port === port && !c.ports.includes(port));
+      owner?.ports.push(port);
+      return !owner;
+    });
+  }
+  if (loose.length) channels.push({ ports: loose });
+  return channels;
+}
+
+/** Los campos `protocols` y `ports` de una relación a partir de sus canales (`null` = sin el campo). */
+export function channelFields(channels: readonly RelationChannel[]): { protocols: ProtocolEntry[] | null; ports: number[] | null } {
+  const protocols: ProtocolEntry[] = [];
+  const ports: number[] = [];
+  for (const c of channels) {
+    const unique = [...new Set(c.ports)];
+    if (!c.id) ports.push(...unique);
+    else protocols.push(unique.length ? { id: c.id, ports: unique } : c.id);
+  }
+  return { protocols: protocols.length ? protocols : null, ports: ports.length ? [...new Set(ports)] : null };
+}
+
+/** Todos los puertos de destino de una relación, de cualquier protocolo. */
+export function relationPorts(rel: WithProtocols): number[] {
+  return [...new Set(relationChannels(rel).flatMap((c) => c.ports))];
+}
+
+function channelText(c: RelationChannel): string {
+  const name = c.id ? (findProtocol(c.id)?.name ?? c.id) : '';
+  return [name, c.ports.map((p) => `:${p}`).join(', ')].filter(Boolean).join(' ');
+}
+
+/**
+ * Protocolos y puertos de una relación, un renglón por cada protocolo con puertos ("DNS :53",
+ * "LDAP :389, :636"); los que no tienen puerto van juntos en el primero ("REST/JSON, HTTPS").
+ */
+export function relationTechLines(rel: WithProtocols): string[] {
+  const channels = relationChannels(rel);
+  const bare = channels.filter((c) => c.id && !c.ports.length).map(channelText);
+  return [...(bare.length ? [bare.join(', ')] : []), ...channels.filter((c) => c.ports.length).map(channelText)];
+}
+
+/** Lo mismo en una línea: "HTTPS :443, :80", "DNS :53 · NTP :123", ":1433". */
+export function relationTechnology(rel: WithProtocols): string {
+  return relationTechLines(rel).join(' · ');
+}
+
+type TwoWay = WithProtocols & { direction?: string; back?: RelationBack };
+
+/**
+ * Lo que una relación bidireccional lleva en el sentido contrario (de `to` hacia `from`), si declara
+ * algo: su etiqueta y sus protocolos, con los puertos por los que escucha `from`. Una relación de un
+ * solo sentido no tiene vuelta, aunque el archivo traiga el bloque.
+ */
+export function relationBack(rel: TwoWay): RelationBack | undefined {
+  const back = rel.direction === 'bidirectional' ? rel.back : undefined;
+  return back && (back.label || back.protocols?.length || back.ports?.length) ? back : undefined;
+}
+
+/**
+ * La vuelta de una relación con un cambio aplicado (`null` en un campo lo quita). Devuelve `null`
+ * cuando no queda nada que declarar: así el bloque desaparece del archivo.
+ */
+export function relationBackWith(
+  back: RelationBack | undefined,
+  patch: { label?: string | null; protocols?: readonly ProtocolEntry[] | null; ports?: readonly number[] | null },
+): RelationBack | null {
+  const next: RelationBack = { ...back };
+  if (patch.label !== undefined) {
+    if (patch.label) next.label = patch.label;
+    else delete next.label;
+  }
+  if (patch.protocols !== undefined) {
+    if (patch.protocols?.length) next.protocols = [...patch.protocols];
+    else delete next.protocols;
+  }
+  if (patch.ports !== undefined) {
+    if (patch.ports?.length) next.ports = [...patch.ports];
+    else delete next.ports;
+  }
+  return Object.keys(next).length ? next : null;
+}
+
+/** Protocolos de los dos sentidos en una línea, para exportar: "LDAP :389 · ← SMB :445". */
+export function relationTechnologyBothWays(rel: TwoWay): string {
+  const back = relationBack(rel);
+  const returning = back ? relationTechnology(back) : '';
+  return [relationTechnology(rel), returning ? `← ${returning}` : ''].filter(Boolean).join(' · ');
+}
+
+/** IDs de los protocolos y puertos de una relación contando los dos sentidos (para los chequeos). */
+export function relationUsage(rel: TwoWay): { protocols: string[]; ports: number[] } {
+  const back = relationBack(rel);
+  return {
+    protocols: [...new Set([...protocolIds(rel), ...(back ? protocolIds(back) : [])])],
+    ports: [...new Set([...relationPorts(rel), ...(back ? relationPorts(back) : [])])],
+  };
 }
 
 export function findProvider(id: string): ProviderItem | undefined {
@@ -474,12 +631,15 @@ export function searchCatalog<T extends CatalogItem>(items: readonly T[], query:
   if (!q) return items.slice(0, limit);
   const scored: { item: T; score: number }[] = [];
   for (const item of items) {
-    const hay = [item.name.toLowerCase(), item.id, ...(item.keywords ?? [])];
+    const name = item.name.toLowerCase();
+    const hay = [name, item.id, ...(item.keywords ?? [])];
     let score = -1;
     for (const h of hay) {
-      if (h === q) score = Math.max(score, 3);
-      else if (h.startsWith(q)) score = Math.max(score, 2);
-      else if (h.includes(q)) score = Math.max(score, 1);
+      // A igual coincidencia, el nombre pesa más que una palabra clave ("dns" → DNS antes que un CDN que también lo ofrece).
+      const own = h === name ? 0.5 : 0;
+      if (h === q) score = Math.max(score, 3 + own);
+      else if (h.startsWith(q)) score = Math.max(score, 2 + own);
+      else if (h.includes(q)) score = Math.max(score, 1 + own);
     }
     if (score >= 0) scored.push({ item, score });
   }

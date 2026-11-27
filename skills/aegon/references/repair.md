@@ -55,6 +55,7 @@ Un archivo con YAML inválido o que no cumple el esquema **se omite entero**. Po
 | `self-relation` (aviso) | `from` y `to` son el mismo elemento | Borrá la relación; si es un paso interno, va como `process` en un flujo |
 | `invalid-scope` | El lienzo abre un elemento del tipo equivocado | L2 abre un `system`, L3 un `container`; en despliegue, `scope` es un `system` |
 | `invalid-placement` (aviso) | Un elemento está ubicado donde no puede; el mensaje dice por qué | Quitalo de `nodes` de ese lienzo. Casos típicos: un contenedor directo en un lienzo de despliegue (va como `instance`), un `node` en un lienzo C4, el elemento de `scope` ubicado dentro de su propio lienzo |
+| `single-replica` (aviso, solo en `lint`) | Algo propio de riesgo alto o crítico corre en producción con una sola réplica, en un nodo que tampoco está repetido | Si es un descuido, poné `instance.replicas` (o `node.instances` en el nodo que lo aloja); si es así de verdad, es un hecho de la arquitectura: contalo en la respuesta |
 | `level-mix` (aviso) | Solo con `strictC4: true` en `aegon.yaml`: un elemento no es del nivel de su lienzo (un componente en un lienzo de contexto) | Es una preferencia de quien armó el workspace: mové el elemento al lienzo de su nivel, o dejalo y contalo en la respuesta |
 | `invalid-instance-target` | Una instancia despliega algo que no es `container`, `store`, `bus` ni `system` | Corregí `instance.of` |
 

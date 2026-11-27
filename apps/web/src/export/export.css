@@ -22,6 +22,9 @@
   --kind-node: #5b6577;
   --kind-infra: #c2410c;
   --edge-network: #2f7de1;
+  --ok: #1f9d63;
+  --warn: #b7860b;
+  --danger: #d93b45;
   box-sizing: border-box;
   padding: 36px 32px 20px;
   background: var(--s-bg);
@@ -49,6 +52,9 @@
   --kind-node: #94a0b8;
   --kind-infra: #fb8c4e;
   --edge-network: #6aa8ff;
+  --ok: #4cc38a;
+  --warn: #e3b341;
+  --danger: #f2555a;
 }
 
 .export-sheet__head {
@@ -223,8 +229,18 @@
   stroke-dasharray: 4 3;
 }
 
-.export-line[data-style='planned'] line {
-  stroke-dasharray: 2 3;
+/* Estados: el mismo color que llevan los nodos y las flechas en el diagrama. */
+.export-mark {
+  flex: none;
+  width: 34px;
+  height: 14px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--status);
+}
+
+.export-sheet [data-status='retired'] {
+  --status: var(--s-subtle);
 }
 
 .export-line[data-style='network'] line {

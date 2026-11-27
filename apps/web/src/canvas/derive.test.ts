@@ -111,6 +111,53 @@ describe('ubicación de etiquetas', () => {
 
   const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
+  it('ida y vuelta: la etiqueta de cada sentido va del lado de la punta a la que apunta', () => {
+    const { model, view } = crossing(500);
+    const twoWay: Relation = { ...model.relations['dns--apim']!, direction: 'bidirectional', protocols: ['dns'], back: { label: 'Devuelve el registro', protocols: ['https'] } };
+    const [edge] = deriveEdges({ ...model, relations: { [twoWay.id]: twoWay } }, view, none, none, none);
+    const [backT, mainT] = edge!.data!.labelTs!;
+    expect(backT).toBeLessThan(0.5);
+    expect(mainT).toBeGreaterThan(0.5);
+    // De un solo sentido sigue con una etiqueta sola, al medio.
+    expect(deriveEdges(model, view, none, none, none)[0]!.data!.labelTs).toBeUndefined();
+    // En una flecha corta no entran separadas: van apiladas, como una etiqueta común.
+    const near: View = { ...view, nodes: { ...view.nodes, apim: { x: -420, y: 460, w: 200, h: 80 } } };
+    expect(deriveEdges({ ...model, relations: { [twoWay.id]: twoWay }, views: { [near.id]: near } }, near, none, none, none)[0]!.data!.labelTs).toBeUndefined();
+  });
+
+  it('una etiqueta movida a mano queda donde se la dejó, y las demás la esquivan', () => {
+    // Dos flechas que se cruzan en el medio: sin tocar nada, una de las dos etiquetas se corre sola.
+    const els: Element[] = ['a', 'b', 'c', 'd'].map((id) => ({ id, kind: 'system', name: id.toUpperCase() }));
+    const rels: Relation[] = [
+      { id: 'a--b', from: 'a', to: 'b', label: 'Primera relación' },
+      { id: 'c--d', from: 'c', to: 'd', label: 'Segunda relación' },
+    ];
+    const box = (x: number, y: number) => ({ x, y, w: 200, h: 80 });
+    const view: View = { id: 'v', name: 'V', level: 1, nodes: { a: box(0, 0), b: box(900, 600), c: box(0, 600), d: box(900, 0) } };
+    const model: Model = { ...emptyModel('m', 'M'), elements: Object.fromEntries(els.map((e) => [e.id, e])), relations: Object.fromEntries(rels.map((r) => [r.id, r])), views: { v: view } };
+    const auto = deriveEdges(model, view, none, none, none);
+    expect(auto.find((e) => e.id === 'a--b')!.data!.labelT).toBeUndefined();
+    expect(auto.find((e) => e.id === 'c--d')!.data!.labelT).toBeDefined();
+
+    // La segunda se deja a mano justo en el cruce: se queda ahí, y la que se corre es la primera.
+    const placed: View = { ...view, edges: { 'c--d': { labelAt: 0.5 } } };
+    const edges = deriveEdges({ ...model, views: { v: placed } }, placed, none, none, none);
+    const second = edges.find((e) => e.id === 'c--d')!.data!;
+    expect(second).toMatchObject({ labelAt: 0.5, labelKey: 'c--d' });
+    expect(second.labelT).toBeUndefined();
+    expect(edges.find((e) => e.id === 'a--b')!.data!.labelT).toBeDefined();
+  });
+
+  it('la etiqueta de una flecha implícita se guarda bajo la primera relación que agrupa', () => {
+    const model = demoModel();
+    const landscape = model.views.landscape!;
+    const implied = deriveEdges(model, landscape, none, none, none).find((e) => e.data!.implied && e.source === 'home-banking' && e.target === 'core-bancario')!;
+    expect(implied.data!.labelKey).toBe('core-client--core-bancario');
+    const moved: View = { ...landscape, edges: { ...landscape.edges, 'core-client--core-bancario': { labelAt: 0.3 } } };
+    const again = deriveEdges({ ...model, views: { ...model.views, landscape: moved } }, moved, none, none, none).find((e) => e.id === implied.id)!;
+    expect(again.data!.labelAt).toBe(0.3);
+  });
+
   it('corre la etiqueta que caería sobre el título de un marco', () => {
     const { model, view } = crossing(20);
     const [edge] = deriveEdges(model, view, none, none, none);

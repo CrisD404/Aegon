@@ -63,7 +63,10 @@ export async function newWorkspaceFlow(initial: Template | null = null) {
   if (result) await createWorkspaceFromTemplate(result.name, result.template);
 }
 
-/** Inserta un bloque centrado en `at` (por defecto, el centro visible del lienzo). */
+/**
+ * Inserta un bloque centrado en `at` (por defecto, el centro visible del lienzo). En despliegue,
+ * solo un punto elegido (doble click) lo mete dentro del nodo donde cae; sin punto queda suelto.
+ */
 export function insertTemplate(template: Template, at?: { x: number; y: number }): string[] | null {
   const ws = useWorkspace.getState();
   const viewId = ui().activeViewId;
@@ -74,6 +77,7 @@ export function insertTemplate(template: Template, at?: { x: number; y: number }
       template,
       viewId,
       at ?? canvasApi.viewportCenter(),
+      { nest: !!at },
     );
     if (!ws.dispatch(op, { label: `Insertar ${template.name}` })) return null;
     ui().markFresh(ids);
@@ -309,7 +313,19 @@ export async function openNewDeploymentView(scope?: Id) {
 
 /** Exportar el lienzo activo a PNG o PDF (con cartel y leyenda). */
 export async function openExportDialog() {
-  if (!useUi.getState().activeViewId) return;
-  const { ExportDialog } = await import('../export/ExportDialog.tsx');
+  if (!useUi.getState().activeViewId) {
+    useUi.getState().toast('Abrí un lienzo para exportarlo');
+    return;
+  }
+  let ExportDialog: typeof import('../export/ExportDialog.tsx').ExportDialog;
+  try {
+    // La exportación se carga recién cuando se usa: si la app se actualizó o se cortó la conexión
+    // con el servidor mientras estaba abierta, la carga falla y hay que decirlo.
+    ({ ExportDialog } = await import('../export/ExportDialog.tsx'));
+  } catch (error) {
+    console.error('No se pudo cargar la exportación', error);
+    useUi.getState().toast('No se pudo abrir la exportación: recargá la página (F5) y probá de nuevo', 'error');
+    return;
+  }
   await showDialog<void>((close) => <ExportDialog close={() => close(undefined)} />, undefined);
 }

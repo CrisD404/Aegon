@@ -24,14 +24,15 @@ import {
   type FinalConnectionState,
   type Node,
   type NodeChange,
+  type NodeDimensionChange,
   type NodePositionChange,
   type EdgeChange,
 } from '@xyflow/react';
-import { canHaveParent, sizeOf, type Element, type ElementKind, type Id, type NodeLayout, type Op } from '@aegon/core';
+import { canHaveParent, shiftEdgeStyle, sizeOf, type Element, type ElementKind, type Id, type NodeLayout, type Op } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
-import { connect, drillInto, openFrameAt, placeExisting, revealElement, toggleExpand, withOpenFit } from '../lib/actions.ts';
-import { computeGuides, contains, type GuideLine } from '../lib/geometry.ts';
+import { connect, drillInto, openFrameAt, placeExisting, toggleExpand, withOpenFit } from '../lib/actions.ts';
+import { bounds, computeGuides, computeResizeGuides, contains, type GapMark, type GuideLine, type Rect } from '../lib/geometry.ts';
 import {
   BOUNDARY_PREFIX,
   FRAME_NODE_TYPES,
@@ -46,7 +47,10 @@ import { ElementNode } from './nodes/ElementNode.tsx';
 import { BoundaryNode, GroupNode } from './nodes/GroupNode.tsx';
 import { DeploymentNode } from './nodes/DeploymentNode.tsx';
 import { OpenNode } from './nodes/OpenNode.tsx';
+import { minNodeSize } from './nodes/sizes.ts';
 import { DepthControl } from './DepthControl.tsx';
+import { DeployBar } from './DeployBar.tsx';
+import { SimBar } from './SimBar.tsx';
 import { EdgeMarkers, RelationEdge } from './edges/RelationEdge.tsx';
 import { GHOST_PANEL_WIDTH, GhostPicker } from './GhostPicker.tsx';
 import { Rulers } from './Rulers.tsx';
@@ -55,6 +59,7 @@ import { CanvasDock } from './CanvasDock.tsx';
 import { CanvasNav } from './CanvasNav.tsx';
 import { SelectionToolbar } from './SelectionToolbar.tsx';
 import { EmptyHint } from './EmptyHint.tsx';
+import { StatusLegend } from './StatusLegend.tsx';
 import { DRAG_MIME, canvasApi } from './api.ts';
 import { LodContext, type Lod } from './lod.ts';
 import { CanvasHighlight } from './Highlight.tsx';
@@ -99,6 +104,13 @@ function lodOf(zoom: number, previous?: string): string {
 }
 
 /**
+ * Teclas que suman a la selección. Va como constante: si el arreglo cambia de identidad en cada
+ * render, ReactFlow vuelve a suscribir sus teclas justo cuando Shift (que re-renderiza el lienzo
+ * por el snap) está apretada, y deja de verla.
+ */
+const MULTI_SELECT_KEYS = ['Meta', 'Control', 'Shift'];
+
+/**
  * Estado de Shift: el ref se actualiza en el mismo evento (lo leen los callbacks de arrastre sin
  * esperar un re-render) y el estado sirve para las props (snap a grilla).
  */
@@ -125,6 +137,8 @@ function useShiftKey() {
   return [shift, ref] as const;
 }
 
+const NO_GUIDES: { lines: GuideLine[]; gaps: GapMark[] } = { lines: [], gaps: [] };
+
 export function Canvas() {
   const model = useWorkspace((s) => s.model);
   const viewId = useUi((s) => s.activeViewId);
@@ -135,6 +149,7 @@ export function Canvas() {
   const snap = useUi((s) => s.snap);
   const rulers = useUi((s) => s.rulers);
   const presenting = useUi((s) => !!s.player);
+  const simulate = useUi((s) => s.simulate);
   const theme = useUi((s) => s.resolvedTheme);
   const transition = useUi((s) => s.transition);
   const focusId = useUi((s) => s.focusId);
@@ -223,6 +238,9 @@ export function Canvas() {
     [model, view, selection, fresh],
   );
 
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+
   /** Pasa al modelo las posiciones/tamaños actuales (absolutos) y la membresía a grupos. */
   const commitLayout = useCallback(
     (dragged: Node[]) => {
@@ -255,6 +273,21 @@ export function Canvas() {
       const ops: Op[] = [];
       if (Object.keys(placements).length)
         ops.push({ type: 'view.place', view: v.id, nodes: placements });
+
+      // Una flecha acomodada a mano acompaña a sus extremos cuando se mueven juntos (ver `followShift`).
+      for (const edge of edgesRef.current) {
+        const key = edge.data?.routeKey;
+        const style = key ? v.edges?.[key] : undefined;
+        const a = placements[edge.source];
+        const b = placements[edge.target];
+        const pa = v.nodes[edge.source];
+        const pb = v.nodes[edge.target];
+        if (!key || !style?.points?.length || !a || !b || !pa || !pb) continue;
+        const dx = a.x - pa.x;
+        const dy = a.y - pa.y;
+        if ((dx || dy) && b.x - pb.x === dx && b.y - pb.y === dy)
+          ops.push({ type: 'view.edge', view: v.id, relation: key, style: shiftEdgeStyle(style, dx, dy) });
+      }
 
       // Membresía: el marco más chico que contiene el centro del nodo soltado (un grupo, o un
       // nodo de despliegue para lo que se despliega).
@@ -321,7 +354,10 @@ export function Canvas() {
         if (c.selected) next.add(c.id!);
         else next.delete(c.id!);
       }
-      const list = [...next].filter((id) => !id.startsWith(BOUNDARY_PREFIX));
+      // Un gesto de selección en el lienzo descarta lo que no está en él (algo elegido en el
+      // explorador, o que ya no existe): si quedara, cada click se sumaría a una selección fantasma.
+      const onCanvas = new Set(key === 'nodes' ? nodesRef.current.map((n) => n.id) : edgesRef.current.map((e) => e.id));
+      const list = [...next].filter((id) => !id.startsWith(BOUNDARY_PREFIX) && onCanvas.has(id));
       ui.setSelection(
         key === 'nodes'
           ? { nodes: list, edges: ui.selection.edges }
@@ -336,9 +372,22 @@ export function Canvas() {
     [applySelectChanges],
   );
 
-  // --- Guías inteligentes (Shift + arrastrar) ------------------------------------------------
-  const [guides, setGuides] = useState<GuideLine[]>([]);
+  // --- Guías inteligentes (Shift + arrastrar o redimensionar) ---------------------------------
+  const [guides, setGuides] = useState<{ lines: GuideLine[]; gaps: GapMark[] }>(NO_GUIDES);
   const [dropTarget, setDropTarget] = useState<Id | null>(null);
+  /**
+   * Última posición de cada nodo arrastrado: la que mandó ReactFlow (`raw`) y la que se mostró
+   * (`shown`, con las guías y a píxeles enteros). Al soltar, ReactFlow vuelve a mandar la suya: se
+   * cambia por la mostrada, así el nodo queda donde se lo veía.
+   */
+  const lastDrag = useRef(new Map<Id, { raw: { x: number; y: number }; shown: { x: number; y: number } }>());
+  /**
+   * Redimensionado en curso. ReactFlow calcula cada paso desde donde empezó y con el mouse, sin
+   * enterarse de lo que se mostró: acá se guarda el rectángulo inicial (de ahí sale qué bordes se
+   * arrastran), el último que pidió (`raw`), el que se mostró (`shown`, a píxeles enteros y con las
+   * guías) y dónde estaba cada hijo, para que no se muevan cuando el borde de su marco se acomoda.
+   */
+  const resizing = useRef<{ id: Id; initial: Rect; origin: { x: number; y: number }; raw: Rect; shown: Rect; children: Map<Id, { x: number; y: number }> } | null>(null);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<AegonNode>[]) => {
@@ -349,40 +398,145 @@ export function Canvas() {
       const moving = changes.filter(
         (c): c is NodePositionChange => c.type === 'position' && !!c.dragging && !!c.position,
       );
-      if (moving.length === 1 && shiftRef.current) {
-        const change = moving[0]!;
+      const ended = changes.some((c) => c.type === 'position' && !c.dragging);
+      // Un paso (o el final) de un redimensionado; las mediciones automáticas no traen `resizing`.
+      const resize = changes.find((c): c is NodeDimensionChange => c.type === 'dimensions' && typeof c.resizing === 'boolean');
+      if (resize?.resizing && resize.dimensions) {
+        const current = nodesRef.current;
+        const node = current.find((n) => n.id === resize.id);
+        let session = resizing.current;
+        // Primer paso del gesto (el nodo todavía no figura como redimensionándose): se anota de dónde parte.
+        if (node && (!session || session.id !== node.id || !node.resizing)) {
+          const initial = absoluteRects(current).get(node.id)!;
+          session = {
+            id: node.id,
+            initial,
+            origin: { x: initial.x - node.position.x, y: initial.y - node.position.y },
+            raw: initial,
+            shown: initial,
+            children: new Map(current.filter((n) => n.parentId === node.id).map((n) => [n.id, n.position])),
+          };
+          resizing.current = session;
+        }
+        if (node && session) {
+          const { initial, origin, children } = session;
+          const moved = changes.find((c): c is NodePositionChange => c.type === 'position' && c.id === node.id && !!c.position);
+          const raw: Rect = {
+            x: moved ? moved.position!.x + origin.x : session.raw.x,
+            y: moved ? moved.position!.y + origin.y : session.raw.y,
+            w: resize.dimensions.width,
+            h: resize.dimensions.height,
+          };
+          let result = computeResizeGuides(initial, raw, 0, undefined, minNodeSize(node.type));
+          if (shiftRef.current) {
+            // Ni el nodo ni lo que lleva adentro son referencia para acomodarse.
+            const inside = new Set<Id>([node.id]);
+            for (const n of current) if (isDescendant(current, n.id, node.id)) inside.add(n.id);
+            const rest = current.filter((n) => n.type !== 'boundary' && !inside.has(n.id));
+            const rects = absoluteRects(current);
+            const rectOf = (n: AegonNode) => rects.get(n.id)!;
+            result = computeResizeGuides(
+              initial,
+              raw,
+              6 / rf.getZoom(),
+              {
+                others: rest.map(rectOf),
+                siblings: rest.filter((n) => n.parentId === node.parentId).map(rectOf),
+                peers: rest.filter((n) => n.type === node.type).map(rectOf),
+              },
+              minNodeSize(node.type),
+            );
+            setGuides(result.lines.length || result.gaps.length ? { lines: result.lines, gaps: result.gaps } : NO_GUIDES);
+          } else if (guides !== NO_GUIDES) {
+            setGuides(NO_GUIDES); // se soltó Shift
+          }
+          const shown = result.rect;
+          session.raw = raw;
+          session.shown = shown;
+          // Lo que manda ReactFlow para el nodo y sus hijos se cambia por lo que se muestra: el tamaño
+          // acomodado, su posición (si se arrastra el borde de arriba o el izquierdo) y los hijos en
+          // el mismo lugar del lienzo donde estaban.
+          const byId = new Map(current.map((n) => [n.id, n]));
+          const differs = (id: Id, at: { x: number; y: number }) => {
+            const now = byId.get(id)?.position;
+            return !now || now.x !== at.x || now.y !== at.y;
+          };
+          const next: NodeChange<AegonNode>[] = changes.filter((c) => c !== resize && !(c.type === 'position' && (c.id === node.id || children.has(c.id))));
+          const position = { x: shown.x - origin.x, y: shown.y - origin.y };
+          if (differs(node.id, position)) next.push({ id: node.id, type: 'position', position });
+          next.push({ ...resize, dimensions: { width: shown.w, height: shown.h } });
+          for (const [childId, at] of children) {
+            const kept = { x: at.x + initial.x - shown.x, y: at.y + initial.y - shown.y };
+            if (differs(childId, kept)) next.push({ id: childId, type: 'position', position: kept });
+          }
+          effective = next;
+        }
+      } else if (resize) {
+        // Fin del redimensionado: ReactFlow manda su último tamaño; queda el que se veía.
+        const session = resizing.current;
+        if (session?.id === resize.id)
+          effective = changes.map((c) => (c === resize ? { ...resize, dimensions: { width: session.shown.w, height: session.shown.h } } : c));
+        resizing.current = null;
+        if (guides !== NO_GUIDES) setGuides(NO_GUIDES);
+      } else if (moving.length) {
         const current = nodesRef.current;
         const rects = absoluteRects(current);
-        const node = current.find((n) => n.id === change.id);
-        const parentAbs = node?.parentId ? rects.get(node.parentId) : undefined;
-        const own = rects.get(change.id);
-        if (node && own && change.position) {
-          const absPos = {
-            x: change.position.x + (parentAbs?.x ?? 0),
-            y: change.position.y + (parentAbs?.y ?? 0),
-          };
-          const others = current
-            .filter(
-              (n) =>
-                n.id !== change.id &&
-                n.type !== 'boundary' &&
-                !isDescendant(current, n.id, change.id),
-            )
-            .map((n) => rects.get(n.id)!);
-          const { dx, dy, lines } = computeGuides({ ...own, ...absPos }, others, 6 / rf.getZoom());
-          setGuides(lines);
-          effective = changes.map((c) =>
-            c === change
-              ? { ...change, position: { x: change.position!.x + dx, y: change.position!.y + dy } }
-              : c,
-          );
+        const byId = new Map(current.map((n) => [n.id, n]));
+        // Cada nodo movido, con su posición absoluta (la del cambio es relativa a su marco).
+        const items = moving.flatMap((change) => {
+          const node = byId.get(change.id);
+          const own = rects.get(change.id);
+          if (!node || !own) return [];
+          const origin = (node.parentId ? rects.get(node.parentId) : undefined) ?? { x: 0, y: 0 };
+          return [{ change, node, origin, rect: { ...own, x: change.position!.x + origin.x, y: change.position!.y + origin.y } }];
+        });
+        let dx = 0;
+        let dy = 0;
+        if (shiftRef.current && items.length) {
+          // Lo que se mueve (y lo que lleva adentro) no es referencia para alinearse.
+          const carried = new Set(items.map((i) => i.node.id));
+          for (const n of current) {
+            let parent = n.parentId;
+            for (let guard = 0; parent && guard < 50; guard++) {
+              if (carried.has(parent)) {
+                carried.add(n.id);
+                break;
+              }
+              parent = byId.get(parent)?.parentId;
+            }
+          }
+          const rest = current.filter((n) => n.type !== 'boundary' && !carried.has(n.id));
+          const parentId = items[0]!.node.parentId;
+          const sameFrame = items.every((i) => i.node.parentId === parentId);
+          const rectOf = (n: AegonNode) => rects.get(n.id)!;
+          const box = bounds(items.map((i) => i.rect))!;
+          // Las distancias se miden con los que van a compartir marco con lo que se mueve (el marco
+          // donde caería al soltarlo): son los que forman fila o columna con él.
+          const el = useWorkspace.getState().model.elements[items[0]!.node.id];
+          const frame = !el || insideOpen(current, items[0]!.node.id) ? parentId : frameUnder(rest, rects, frameTypeFor(el), { x: box.x + box.w / 2, y: box.y + box.h / 2 });
+          const result = computeGuides(box, rest.map(rectOf), 6 / rf.getZoom(), sameFrame ? rest.filter((n) => n.parentId === frame).map(rectOf) : []);
+          dx = result.dx;
+          dy = result.dy;
+          setGuides(result.lines.length || result.gaps.length ? { lines: result.lines, gaps: result.gaps } : NO_GUIDES);
+        } else if (guides !== NO_GUIDES) {
+          setGuides(NO_GUIDES); // se soltó Shift
         }
-      } else if (
-        guides.length &&
-        (moving.length || changes.some((c) => c.type === 'position' && !c.dragging))
-      ) {
-        // Se soltó Shift o terminó el arrastre (otros cambios, como la selección, no las borran).
-        setGuides([]);
+        // A píxeles enteros: lo que se ve durante el arrastre es lo que se guarda al soltar.
+        const shown = new Map<Id, { x: number; y: number }>();
+        for (const { change, origin, rect } of items) {
+          const position = { x: Math.round(rect.x + dx) - origin.x, y: Math.round(rect.y + dy) - origin.y };
+          shown.set(change.id, position);
+          lastDrag.current.set(change.id, { raw: change.position!, shown: position });
+        }
+        effective = changes.map((c) => (c.type === 'position' && shown.has(c.id) ? { ...c, position: shown.get(c.id)! } : c));
+      } else if (ended) {
+        // Fin del arrastre: la posición que llega es la del mouse, sin el ajuste de las guías.
+        effective = changes.map((c) => {
+          const last = c.type === 'position' && !c.dragging && c.position ? lastDrag.current.get(c.id) : undefined;
+          return last && c.type === 'position' && last.raw.x === c.position!.x && last.raw.y === c.position!.y ? { ...c, position: last.shown } : c;
+        });
+        lastDrag.current.clear();
+        if (guides !== NO_GUIDES) setGuides(NO_GUIDES);
       }
 
       applySelectChanges(effective, 'nodes');
@@ -399,30 +553,22 @@ export function Canvas() {
         const draggedEl = useWorkspace.getState().model.elements[moving[0]!.id];
         if (first && draggedEl && !insideOpen(next, moving[0]!.id)) {
           const c = { x: first.x + first.w / 2, y: first.y + first.h / 2 };
-          let best: { id: Id; area: number } | null = null;
-          for (const n of next) {
-            if (
-              n.type !== frameTypeFor(draggedEl) ||
-              moving.some((m) => m.id === n.id || isDescendant(next, n.id, m.id))
-            )
-              continue;
-            const r = rects.get(n.id)!;
-            if (contains(r, c) && (!best || r.w * r.h < best.area))
-              best = { id: n.id, area: r.w * r.h };
-          }
-          setDropTarget(best?.id ?? null);
+          const candidates = next.filter((n) => !moving.some((m) => m.id === n.id || isDescendant(next, n.id, m.id)));
+          setDropTarget(frameUnder(candidates, rects, frameTypeFor(draggedEl), c) ?? null);
         }
       }
 
-      if (effective.some((c) => c.type === 'dimensions' && c.resizing === false && c.setAttributes))
-        commitLayout([]);
+      // Fin de un redimensionado: el tamaño pasa al modelo. (ReactFlow marca el final con
+      // `resizing: false`; las mediciones automáticas no traen ese campo.)
+      if (effective.some((c) => c.type === 'dimensions' && c.resizing === false)) commitLayout([]);
     },
-    [shiftRef, rf, guides.length, withBoundary, setNodes, commitLayout, applySelectChanges],
+    [shiftRef, rf, guides, withBoundary, setNodes, commitLayout, applySelectChanges],
   );
 
   const onNodeDragStop = useCallback(
     (_e: MouseEvent | TouchEvent, _node: AegonNode, dragged: AegonNode[]) => {
-      setGuides([]);
+      setGuides(NO_GUIDES);
+      lastDrag.current.clear();
       setDropTarget(null);
       commitLayout(dragged);
     },
@@ -463,10 +609,13 @@ export function Canvas() {
       openGhost(e.clientX, e.clientY);
       return;
     }
-    // Una instancia lleva a lo que despliega (su contenedor en el lienzo de contenedores).
+    // En un despliegue nada lleva a otro lienzo: el doble click renombra (la definición de una
+    // instancia se abre desde el inspector).
     const el = (node.data as { element?: Element }).element;
-    if (el?.kind === 'instance') {
-      revealElement(el.instance.of);
+    const level = (node.data as { level?: unknown }).level;
+    if (el?.kind === 'instance' || level === 'deployment') {
+      useUi.getState().select([node.id]);
+      useUi.getState().requestRename();
       return;
     }
     if (node.type === 'element' && (node.data as { canDrill?: boolean }).canDrill) {
@@ -781,7 +930,10 @@ export function Canvas() {
       }
       // Señal para tests y automatizaciones: encuadrado y con la animación de entrada terminada.
       void framing.then(() =>
-        setTimeout(() => shellRef.current?.setAttribute('data-framed', viewId), 300),
+        setTimeout(() => {
+          // Si mientras tanto se abrió otro lienzo, esta marca ya no vale (era del anterior).
+          if (useUi.getState().activeViewId === viewId) shellRef.current?.setAttribute('data-framed', viewId);
+        }, 300),
       );
     });
   }, [viewId, focusId, nodes.length, nodesInitialized, rf, transition, isEmptyView]);
@@ -836,13 +988,13 @@ export function Canvas() {
             zoomOnDoubleClick={false}
             deleteKeyCode={null}
             selectionKeyCode={null}
-            multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
+            multiSelectionKeyCode={MULTI_SELECT_KEYS}
             selectionOnDrag
             panOnDrag={[1]}
             panActivationKeyCode="Space"
             panOnScroll
             zoomOnPinch
-            selectionMode={SelectionMode.Partial}
+            selectionMode={SelectionMode.Full}
             snapToGrid={snap && !shift}
             snapGrid={[16, 16]}
             minZoom={0.08}
@@ -867,7 +1019,7 @@ export function Canvas() {
             <ViewportPortal>
               {/* Dentro del viewport: así las flechas viajan con la imagen al exportar. */}
               <EdgeMarkers />
-              <GuideLines guides={guides} />
+              <GuideLines lines={guides.lines} gaps={guides.gaps} />
             </ViewportPortal>
             <SelectionToolbar />
             <DropTargetMarker id={dropTarget} />
@@ -883,6 +1035,9 @@ export function Canvas() {
       {view && !presenting ? <CanvasSearch view={view} /> : null}
       {view && !presenting ? <CostChip view={view} /> : null}
       {view && !presenting ? <DepthControl view={view} /> : null}
+      {view ? <StatusLegend nodes={nodes} edges={edges} /> : null}
+      {view && view.level === 'deployment' && !presenting && !simulate ? <DeployBar view={view} /> : null}
+      {view && simulate && !presenting ? <SimBar view={view} /> : null}
       {view ? <CommentPlacer view={view} /> : null}
       <StepPicker />
       <FlowPlayer />
@@ -892,23 +1047,32 @@ export function Canvas() {
   );
 }
 
-/** Guías de alineación: líneas de 1 px en pantalla (su grosor depende del zoom). */
-function GuideLines({ guides }: { guides: GuideLine[] }) {
+/**
+ * Guías de alineación (líneas de 1 px en pantalla: su grosor depende del zoom) y separaciones con
+ * los vecinos: un tramo con su medida, resaltado cuando esa distancia se repite en la fila o columna.
+ */
+function GuideLines({ lines, gaps }: { lines: GuideLine[]; gaps: GapMark[] }) {
   const zoom = useStore((s) => s.transform[2]);
-  return guides.map((g, i) =>
-    g.orientation === 'v' ? (
-      <div
-        key={i}
-        className="guide-line"
-        style={{ left: g.at, top: g.from, width: 1 / zoom, height: g.to - g.from }}
-      />
-    ) : (
-      <div
-        key={i}
-        className="guide-line"
-        style={{ top: g.at, left: g.from, height: 1 / zoom, width: g.to - g.from }}
-      />
-    ),
+  if (!lines.length && !gaps.length) return null;
+  const px = 1 / zoom;
+  return (
+    <>
+      {lines.map((g, i) =>
+        g.orientation === 'v' ? (
+          <div key={`l${i}`} className="guide-line" style={{ left: g.at, top: g.from, width: px, height: g.to - g.from }} />
+        ) : (
+          <div key={`l${i}`} className="guide-line" style={{ top: g.at, left: g.from, height: px, width: g.to - g.from }} />
+        ),
+      )}
+      {gaps.map((g, i) => {
+        const span: Rect = g.axis === 'h' ? { x: g.from, y: g.at, w: g.to - g.from, h: px } : { x: g.at, y: g.from, w: px, h: g.to - g.from };
+        return (
+          <div key={`g${i}`} className="guide-gap" data-axis={g.axis} data-equal={g.equal || undefined} style={{ left: span.x, top: span.y, width: span.w, height: span.h, ['--px' as string]: `${px}px` }}>
+            <span style={{ transform: `translate(-50%, -50%) scale(${px})` }}>{g.size}</span>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -921,6 +1085,17 @@ function isDescendant(nodes: readonly Node[], id: string, ancestor: string): boo
     current = byId.get(current)?.parentId;
   }
   return false;
+}
+
+/** Marco más chico de ese tipo que contiene el punto: donde caería lo que se suelte ahí. */
+function frameUnder(nodes: readonly Node[], rects: ReadonlyMap<string, Rect>, type: 'group' | 'deployment', point: { x: number; y: number }): Id | undefined {
+  let best: { id: Id; area: number } | undefined;
+  for (const n of nodes) {
+    if (n.type !== type) continue;
+    const r = rects.get(n.id);
+    if (r && contains(r, point) && (!best || r.w * r.h < best.area)) best = { id: n.id, area: r.w * r.h };
+  }
+  return best?.id;
 }
 
 /** ¿El nodo está dentro de un elemento abierto en el lugar? */

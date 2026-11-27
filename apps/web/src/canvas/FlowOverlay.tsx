@@ -209,7 +209,7 @@ export function FlowOverlay({ view }: { view: View }) {
       const forward = edge.source === p.ends.a;
       rules.push(`${scope} .react-flow__edge[data-id="${id}"] { opacity: 1; }`);
       rules.push(
-        `${scope} [data-testid="edge-label-${id}"] { opacity: 1; border-color: var(--accent-ring); }`,
+        `${scope} [data-edge-label="${id}"] { opacity: 1; border-color: var(--accent-ring); }`,
       );
       rules.push(
         `${scope} .react-flow__edge[data-id="${id}"] .c4-edge-path { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 7 6; animation: aegon-flow 0.7s linear infinite ${forward ? 'normal' : 'reverse'}; }`,

@@ -20,6 +20,8 @@ import {
   STATUSES,
   TECHNOLOGIES,
   analyzeModel,
+  isProductionEnvironment,
+  simulateLoad,
   ancestorsOf,
   childViewOf,
   childrenOf,
@@ -32,6 +34,7 @@ import {
   flowToText,
   indexOf,
   placeableElements,
+  relationBack,
   relationsOf,
   searchCatalog,
   sortedValues,
@@ -178,6 +181,8 @@ function relationBrief(model: Model, rel: Relation) {
   if (rel.label) out.label = rel.label;
   if (rel.protocols?.length) out.protocols = rel.protocols;
   if (rel.direction === 'bidirectional') out.bidirectional = true;
+  const back = relationBack(rel);
+  if (back) out.back = back;
   if (rel.status && rel.status !== 'live') out.status = rel.status;
   return out;
 }
@@ -473,6 +478,32 @@ export function registerTools(server: McpServer, session: Session): void {
   );
 
   server.registerTool(
+    'simulate',
+    {
+      title: 'Simular carga',
+      description:
+        'Simula carga: reparte el tráfico que entra (pedidos por segundo) por las relaciones del modelo y lo compara con lo que aguanta cada parte (capacidad por réplica × réplicas del ambiente). Devuelve el uso de cada parte, qué se satura (saturated), a quién frena (affectedBy), lo que se acumula por un bus (backlog) y hasta cuánto aguanta (limit, failureLimit). Es un modelo, no una medición: las capacidades sin cargar se suponen por tipo (assumed) y notes dice qué se supuso.',
+      inputSchema: z.object({
+        rps: z.number().nonnegative().describe('Pedidos por segundo que entran, en total'),
+        environment: z.string().optional().describe('Ambiente del que salen las réplicas (por defecto, el productivo)'),
+        system: z.string().optional().describe('ID o nombre del sistema a simular (por defecto, todo el modelo)'),
+      }),
+      annotations: READ,
+    },
+    read((ws, args: { rps: number; environment?: string; system?: string }) => {
+      const environments = ws.model.workspace.environments ?? [];
+      if (args.environment && !environments.some((e) => e.id === args.environment)) {
+        throw new WorkspaceError('not-found', `No existe el ambiente "${args.environment}"`);
+      }
+      const environment = args.environment ?? environments.find((e) => isProductionEnvironment(ws.model, e.id))?.id;
+      const scope = args.system ? ws.element(args.system) : undefined;
+      if (scope && scope.kind !== 'system') throw new WorkspaceError('invalid-scope', `"${scope.name}" no es un sistema`);
+      const result = simulateLoad(ws.model, { rps: args.rps, environment, scope: scope?.id });
+      return { ok: !result.saturated.length, rps: args.rps, environment: environment ?? null, system: scope?.id ?? null, ...result };
+    }),
+  );
+
+  server.registerTool(
     'export',
     {
       title: 'Exportar',
@@ -597,14 +628,27 @@ export function registerTools(server: McpServer, session: Session): void {
         to: ref('elemento destino'),
         label: z.string().optional().describe('Qué hace: "Lee y escribe", "Publica pagos"'),
         description: z.string().optional(),
-        protocols: z.array(z.string()).optional().describe('IDs del catálogo: https, rest, grpc, graphql, kafka, amqp, jdbc, sql, tds, resp, s3-api, sftp, oidc, tcp, bgp…'),
-        ports: z.array(z.number().int().min(1).max(65535)).optional().describe('Puertos de destino: [443], [8080], [443, 80]'),
+        protocols: z
+          .array(z.union([z.string(), z.object({ id: z.string().min(1), ports: z.array(z.number().int().min(1).max(65535)).min(1) })]))
+          .optional()
+          .describe('IDs del catálogo: https, rest, grpc, graphql, kafka, amqp, jdbc, sql, tds, resp, s3-api, sftp, oidc, tcp, bgp… Para decir por qué puerto va cada uno: "dns:53", "ldap:389/636" o { id: "dns", ports: [53] }'),
+        ports: z.array(z.number().int().min(1).max(65535)).optional().describe('Puertos de destino sin protocolo asignado: [8080]. Con protocolos, mejor el puerto junto a cada uno'),
         bidirectional: z.boolean().optional(),
+        back: z
+          .object({
+            label: z.string().optional().describe('Qué hace en el otro sentido'),
+            protocols: z
+              .array(z.union([z.string(), z.object({ id: z.string().min(1), ports: z.array(z.number().int().min(1).max(65535)).min(1) })]))
+              .optional()
+              .describe('Protocolos del otro sentido, con los puertos por los que escucha "from": "smb:445"'),
+          })
+          .optional()
+          .describe('Lo que va en el otro sentido (de "to" hacia "from"). Declararlo vuelve bidireccional la relación; el lienzo dibuja cada sentido con sus protocolos'),
         status: status.optional(),
       }),
       annotations: WRITE,
     },
-    write(async (ws, args: { from: string; to: string; label?: string; description?: string; protocols?: string[]; ports?: number[]; bidirectional?: boolean; status?: Relation['status'] }) => {
+    write(async (ws, args: { from: string; to: string; label?: string; description?: string; protocols?: Relation['protocols']; ports?: number[]; bidirectional?: boolean; back?: { label?: string; protocols?: Relation['protocols'] }; status?: Relation['status'] }) => {
       const plan = planConnect(ws.model, { ...args, direction: args.bidirectional ? 'bidirectional' : undefined });
       const names = `${ws.model.elements[plan.from]!.name} → ${ws.model.elements[plan.to]!.name}`;
       const text = { created: 'Relación creada', bidirectional: 'Relación ahora bidireccional', updated: 'Relación actualizada', exists: 'Ya estaban conectados, sin cambios' }[plan.result];
@@ -618,7 +662,7 @@ export function registerTools(server: McpServer, session: Session): void {
     'update_relation',
     {
       title: 'Modificar relación',
-      description: 'Cambia campos de una relación (label, description, protocols, ports, direction, status, tags, from, to). null borra el campo.',
+      description: 'Cambia campos de una relación (label, description, protocols, ports, direction, back, status, tags, from, to). null borra el campo. `back` es lo que va en el otro sentido de una bidireccional: { label, protocols } y se reemplaza entero.',
       inputSchema: z.object({ id: z.string().min(1), patch: patch.describe('Campos a cambiar (null = borrar)') }),
       annotations: WRITE,
     },
@@ -626,6 +670,7 @@ export function registerTools(server: McpServer, session: Session): void {
       const warnings: string[] = [];
       const p = { ...args.patch } as RelationPatch;
       if (Array.isArray(p.protocols)) p.protocols = normalizeProtocols(p.protocols, warnings);
+      if (p.back && Array.isArray(p.back.protocols)) p.back = { ...p.back, protocols: normalizeProtocols(p.back.protocols, warnings) };
       const result = await apply(ws, { type: 'relation.update', id: args.id, patch: p }, `Relación ${args.id} actualizada`, { id: args.id, warnings });
       return { ...result, relation: ws.model.relations[args.id] };
     }),

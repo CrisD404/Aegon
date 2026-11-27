@@ -25,7 +25,7 @@ Qué se modela, con qué tipo y cómo se escribe. Los comandos están en [cli.md
 | `infra` | Despliegue: por donde pasa el tráfico | `node` | `--infra-type` |
 | `instance` | Despliegue: un contenedor, base, bus o sistema desplegado | `node` | `--of`, `--replicas` |
 
-Opciones para cualquier tipo: `-d` (descripción corta, se ve en el nodo), `--external`, `--status planned|live|deprecated|retired`, `--risk low|medium|high|critical` (no en actores, grupos ni instancias), `--group <id>` (repetible), `--tags a,b`, `--owner`, `--env a,b`, `--parent`, `--view`, `--id`.
+Opciones para cualquier tipo: `-d` (descripción corta, se ve en el nodo), `--external`, `--status planned|live|changing|deprecated|retired` (nuevo, existente, se modifica, se da de baja, retirado), `--risk low|medium|high|critical` (no en actores, grupos ni instancias), `--group <id>` (repetible), `--tags a,b`, `--owner`, `--env a,b`, `--parent`, `--view`, `--id`.
 
 Solo en YAML: `docs` (Markdown largo), `links` (`[{ url, label }]`), `properties`, `store.version`, `store.managed` (`aws-rds`), `bus.type`, `group.account`, `group.cidr`, `finops`.
 
@@ -61,10 +61,16 @@ ports: [ 5432 ]
 ```
 
 - **Una relación por par de elementos.** Si la comunicación va en los dos sentidos, `direction: bidirectional` (`--bidirectional`). Si hay varios motivos, resumilos en la etiqueta.
+- **Cada sentido con lo suyo.** En una bidireccional, `label` y `protocols` son los de la ida (`from` → `to`); lo que va de vuelta se declara aparte, con los puertos por los que escucha `from`: `--back-label "Replica perfiles" --back-protocols smb:445` en la CLI, `back: { label: Replica perfiles, protocols: [ { id: smb, ports: [ 445 ] } ] }` en el YAML. El lienzo dibuja una etiqueta por sentido.
 - **Entre los elementos más específicos.** Conectá contenedor con contenedor (o componente con componente); en los niveles de arriba Aegon dibuja la relación implícita entre los ancestros, punteada. No dupliques la relación entre sistemas.
 - **No conectes un elemento con su propio padre o hijo**, ni un actor directo a una base de datos: pasá por el contenedor que la usa.
 - `from` es quien inicia la comunicación. La etiqueta dice qué hace, en presente: "Crea pedidos", "Publica pedidos.creados", "Consume pedidos.creados".
+- Cuando importa por qué puerto va cada protocolo (redes, firewalls), el puerto va junto al protocolo: `-p dns:53,ntp:123,ldap:389/636` en la CLI, `protocols: [ { id: dns, ports: [ 53 ] } ]` en el YAML. `--ports` y `ports` quedan para puertos sin protocolo.
 - `protocols` usa el catálogo (abajo). Un productor o un consumidor de un bus se conectan **hacia** el bus con el protocolo del broker (`kafka`, `amqp`).
+
+### Carga (opcional)
+
+`simulate` responde cuánto tráfico aguanta el modelo sin cargar nada. Solo si tenés el dato real, afinalo: `load: { capacity: 450 }` en un container, store, bus o system son los pedidos por segundo que atiende una réplica, y `calls: 0.4` en una relación son las llamadas al destino por cada pedido que atiende el origen (por defecto 1). No inventes capacidades: lo que falta se supone por tipo y `simulate` lo marca como supuesto.
 
 ## Lienzos
 
@@ -125,6 +131,8 @@ Reglas:
 - Las relaciones entre contenedores **no se repiten** entre instancias: Aegon las proyecta solas.
 - El camino de red sí se modela, con relaciones comunes: `connect cliente balanceador`, `connect balanceador web-prod`. Pueden llegar a un nodo (un enlace que entra a una VPC).
 - En un lienzo de despliegue se ubican instancias, nodos, infraestructura, actores y sistemas externos. Un contenedor no se ubica directo: se despliega como instancia.
+- Un servidor, una VM o un equipo es un **nodo** (`--node-type server|vm`) y lleva la IP en `--addresses`. Lo que corre en él (un servicio, un directorio, un DNS) es software: se modela como sistema o contenedor y se despliega con `add instance --of <id> --parent <nodo>`. No modeles un servidor como sistema: un sistema no lleva dirección.
+- Para mostrar un cambio (qué se agrega, qué se toca, qué se saca) usá `--status` en lo que cambia y dejá sin marcar lo que ya existe: `planned` es nuevo, `changing` existe y se modifica, `deprecated` se da de baja. No hace falta marcar todo: lo que está dentro de un nodo `planned` y las relaciones que llegan a él se ven nuevos solos. Una relación nueva entre dos cosas que ya existen (una regla de firewall que hay que abrir) se marca en la relación: `connect a b --status planned`.
 - `lint` avisa (`[not-deployed]`) por cada contenedor, base o bus del sistema desplegado que no tenga instancia en ese ambiente. Desplegalos o contá en la respuesta que el despliegue es parcial.
 - Usá direcciones y hosts reales solo si salen del repositorio que estás leyendo; en ejemplos, `example.com`.
 

@@ -1,6 +1,6 @@
 import { forwardRef } from 'react';
 import type { Model, View } from '@aegon/core';
-import type { LegendItem, LegendLine } from './legend.ts';
+import type { LegendItem, LegendLine, LegendMark } from './legend.ts';
 import './export.css';
 
 export type SheetTone = 'light' | 'dark';
@@ -18,7 +18,7 @@ export interface SheetData {
   image: string;
   width: number;
   height: number;
-  legend: { items: LegendItem[]; lines: LegendLine[] };
+  legend: { items: LegendItem[]; lines: LegendLine[]; marks: LegendMark[] };
   exportedAt: Date;
 }
 
@@ -67,7 +67,7 @@ export const ExportSheet = forwardRef<HTMLDivElement, { data: SheetData; options
       </div>
       {options.legend || options.titleBlock ? (
         <footer className="export-sheet__foot">
-          {options.legend && (data.legend.items.length || data.legend.lines.length) ? (
+          {options.legend && (data.legend.items.length || data.legend.lines.length || data.legend.marks.length) ? (
             <section className="export-legend" aria-label="Leyenda">
               <div className="export-sheet__label">Leyenda</div>
               <div className="export-legend__grid">
@@ -84,6 +84,15 @@ export const ExportSheet = forwardRef<HTMLDivElement, { data: SheetData; options
                   <div key={line.key} className="export-legend__item">
                     <LineSwatch line={line} />
                     <span>{line.label}</span>
+                  </div>
+                ))}
+                {data.legend.marks.map((mark) => (
+                  <div key={mark.status} className="export-legend__item" data-testid={`export-mark-${mark.status}`}>
+                    <span className="export-mark" data-status={mark.status} aria-hidden />
+                    <span>
+                      {mark.label}
+                      <small> · {mark.hint}</small>
+                    </span>
                   </div>
                 ))}
               </div>

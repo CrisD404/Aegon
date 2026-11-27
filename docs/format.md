@@ -50,8 +50,24 @@ desde los esquemas zod de `@aegon/core`).
 | `instance` | despliegue | `node` | `instance: { of, replicas }`, `addresses`, `resource` |
 
 Campos comunes: `name`, `description`, `docs` (Markdown), `groups`, `scope` (`internal` por
-defecto, `external`), `status` (`live` por defecto, `planned`, `deprecated`, `retired`), `tags`,
-`owner`, `links`, `properties`, `extensions`. `risk` aplica a todo menos actores y grupos.
+defecto, `external`), `status`, `tags`, `owner`, `links`, `properties`, `extensions`. `risk` aplica
+a todo menos actores y grupos.
+
+`status` dice qué pasa con el elemento (o la relación) y es lo que el lienzo pinta como nuevo o
+modificado:
+
+| `status` | Qué significa | En el lienzo |
+| --- | --- | --- |
+| `live` (por defecto) | Ya existe y no cambia | Sin marca |
+| `planned` | Nuevo: todavía no existe | Verde, etiqueta «Nuevo» |
+| `changing` | Ya existe y se modifica | Ámbar, etiqueta «Se modifica» |
+| `deprecated` | Existe y se da de baja | Rojo, etiqueta «Baja» |
+| `retired` | Ya no está | Gris, nombre tachado |
+
+Lo que no tiene `status` lo toma de su contexto: lo que está dentro (`parent`) de algo `planned`,
+`deprecated` o `retired` se ve igual; una instancia se ve como lo que despliega; y una relación
+toma el estado de un extremo que todavía no existe o deja de existir. `changing` no se hereda:
+cambia el servidor, no lo que corre adentro. Marcar el elemento lo saca de esa regla.
 
 Cada cosa con su catálogo: `technology` (lenguajes, frameworks, plataformas) solo existe en
 `system`, `container` y `component`; una base de datos se describe por su **motor**
@@ -108,8 +124,48 @@ protocols: [ jdbc ]
   identidad (`oauth2`, `oidc`, `saml`, `ldap`, `kerberos`), correo (`smtp`, `imap`) y red (`tcp`,
   `udp`, `ssh`, `dns`, `vpn`). La app sugiere primero los que encajan con el destino (JDBC hacia
   PostgreSQL, Kafka hacia un bus Kafka, HTTPS/REST hacia una API).
-- `ports` son los puertos de destino (`ports: [ 443, 80 ]`); la app los muestra junto a los
-  protocolos (`[HTTPS :443, :80]`). Los protocolos de red incluyen también `bgp` y `tds` (SQL Server).
+- **Cada protocolo con sus puertos.** Una entrada de `protocols` es el ID (`https`) o, para decir
+  por qué puertos de destino va, el ID con sus `ports`. Así una relación con varios servicios no
+  mezcla nada:
+
+  ```yaml
+  protocols:
+    - id: dns
+      ports: [ 53 ]
+    - id: ldap
+      ports: [ 389, 636 ]
+    - https          # sin puerto
+  ```
+
+  La flecha muestra un renglón por cada uno (`[DNS :53]`, `[LDAP :389, :636]`) y los que no tienen
+  puerto van juntos (`[REST/JSON, HTTPS]`).
+- En una relación bidireccional, `protocols` y `label` son los de la **ida** (de `from` hacia `to`) y
+  el bloque `back` lleva los de la **vuelta** (de `to` hacia `from`), con los puertos por los que
+  escucha `from`:
+
+  ```yaml
+  from: servidor-de-archivos
+  to: controlador-de-dominio
+  label: Autentica
+  protocols:
+    - id: ldap
+      ports: [ 389 ]
+  direction: bidirectional
+  back:
+    label: Replica perfiles
+    protocols:
+      - id: smb
+        ports: [ 445 ]
+  ```
+
+  El lienzo dibuja una sola línea con doble punta y una etiqueta por sentido, cada una cerca de la
+  punta a la que apunta y con una flechita que dice hacia dónde va (si la flecha es corta, van
+  apiladas). `back` solo cuenta con `direction: bidirectional`.
+- `ports` son los puertos de destino **sin protocolo asignado** (`ports: [ 8080 ]`). Si la relación
+  tiene un solo protocolo son suyos (`[HTTPS :443, :80]`); con varios, cada puerto se muestra con el
+  protocolo que lo usa habitualmente (53 con `dns`, 123 con `ntp`) y lo que no se puede asignar
+  queda aparte. Los protocolos de red incluyen también `bgp`, `ntp`, `dhcp`, `rdp`, `icmp`, `snmp`,
+  `syslog` y `tds` (SQL Server).
 - `direction` es `outgoing` por defecto. Conviene conectar los elementos más específicos: en los
   niveles superiores Aegon dibuja la relación **implícita** entre los ancestros que sí están en el
   lienzo (punteada, una sola por par).
@@ -127,6 +183,14 @@ nodes:              # esquina superior izquierda, en coordenadas absolutas del l
   payments-db: { x: 320, y: 0, w: 224, h: 120 }
 edges:              # solo las relaciones con estilo distinto del default
   payments-api--payments-db: { shape: step }
+  # points: recorrido acomodado a mano; la flecha pasa por esos puntos (coordenadas del lienzo)
+  payments-api--ledger: { points: [ { x: 280, y: 180 }, { x: 520, y: 180 } ] }
+  # from / to: punta fija en un lado del origen o del destino (top, right, bottom, left);
+  # `at` es la posición sobre ese lado, de 0 a 1 (sin `at`, al medio)
+  payments-api--bus: { from: { side: bottom }, to: { side: left, at: 0.25 } }
+  # labelAt: etiqueta movida a mano, a qué altura del trazo va (0 = origen, 1 = destino);
+  # backLabelAt: lo mismo para la etiqueta de la vuelta de una relación bidireccional
+  payments-api--gateway: { labelAt: 0.25 }
 expanded: [ payments-api ]   # abiertos en el lugar: un marco con sus hijos adentro
 ```
 
@@ -163,6 +227,12 @@ Es el diagrama de despliegue de C4:
 - `addresses` (IPs, CIDRs, hosts, URLs) y `resource` (`vpc-…`, `i-…`, un ARN) se muestran en los
   nodos. `environments` dice en qué ambientes existe cada uno (sin el campo: en todos).
 
+Quién lleva la dirección: el **equipo** (un servidor, una VM) es un nodo con `addresses`; el
+**software** que corre en él es una instancia, que puede tener las suyas (un puerto, un nombre de
+servicio). Un `system` ubicado directo en un lienzo de despliegue es válido (un SaaS de un tercero)
+pero no lleva dirección ni réplicas: la app ofrece convertirlo en nodo o en instancia, y crea el
+software nuevo ya desplegado (el elemento lógico más su instancia en el ambiente del lienzo).
+
 ```yaml
 # views/home-banking-despliegue-qa.yaml
 id: home-banking-despliegue-qa
@@ -183,6 +253,18 @@ explícito entre dos instancias (actor → firewall → balanceador → instanci
 omite, porque el camino ya la cuenta. Los tramos de red (relaciones con nodos, infraestructura o
 instancias) se dibujan en azul punteado y pueden llegar a un nodo, por ejemplo un enlace que
 entra a una VPC.
+
+**Armar un despliegue sin partir de cero.** En el modo Desplegar de la app:
+
+- **Copiar a otro ambiente** duplica lo propio del ambiente de origen (los nodos, la
+  infraestructura y las instancias con `environments: [origen]`) para el ambiente nuevo, con la
+  misma disposición y los IDs del ambiente nuevo (`vpc-prod` → `vpc-qa`). Lo que vale para todos
+  los ambientes se comparte. No se copian `addresses`, `resource` ni `node.account`, que son de
+  cada ambiente; las réplicas salen de `finops.costs.<ambiente>.replicas` si están cargadas.
+- **Desplegar todo** crea una instancia de cada contenedor, base y bus que vale para ese ambiente y
+  todavía no tiene ninguna, dentro del nodo elegido o de un nodo nuevo (`node.type: other`) que
+  después se renombra y se tipa.
+- **Comparar** muestra las réplicas de cada parte en cada ambiente que tiene despliegue.
 
 ## Datos del documento
 
@@ -209,6 +291,9 @@ nivel, el ambiente y el sistema.
 - `aegon lint` y `analyze` suman:
   - Tráfico sin cifrar (HTTP o puerto 80).
   - Contenedores sin instancia en un ambiente que tiene lienzo de despliegue.
+  - Réplica única: algo propio de riesgo alto o crítico que en producción corre con una sola
+    réplica, en un nodo que tampoco está repetido. El ambiente productivo se reconoce por su ID o
+    nombre ("prod", "Producción"); si ninguno lo dice, es el último de la lista.
 
 Un archivo con YAML inválido o que no cumple el esquema se reporta (con su ruta) y se omite: el
 resto del workspace abre igual.
@@ -254,6 +339,41 @@ finops:
   y en el panel **Costos** (por ambiente contra presupuesto, por sistema, grupo y etiqueta), y los
   exporta a CSV (una fila por elemento y ambiente).
 - Aegon avisa si un elemento usa un ambiente que no está definido en `aegon.yaml`.
+
+## Simulador de carga
+
+El modo **Simular** de la app, `aegon simulate` y la herramienta `simulate` del MCP responden lo
+mismo: con cierto tráfico de entrada, cuánto le llega a cada parte, qué se queda sin margen primero
+y hasta cuánto aguanta. Es un modelo, no una medición: sirve para ver órdenes de magnitud y
+encontrar el cuello de botella.
+
+No hace falta cargar nada: el recorrido sale de las relaciones y las réplicas, del despliegue. Dos
+campos opcionales afinan el resultado donde se conoce el dato:
+
+```yaml
+# model/elements/pagos-api.yaml
+load:
+  capacity: 450        # pedidos por segundo que atiende UNA réplica
+
+# model/relations/api-gateway--pagos-api.yaml
+calls: 0.4             # llamadas al destino por cada pedido que atiende el origen (por defecto 1)
+```
+
+Cómo se calcula:
+
+- **Por dónde entra.** Por las relaciones que salen de un actor (repartido entre ellas según su
+  `calls`; por defecto, en partes iguales). Sin actores, por lo que nadie llama.
+- **Por dónde sigue.** Cada pedido que una parte atiende recorre todas sus relaciones (el peor
+  caso); `calls` lo ajusta (`0.4` = cuatro de cada diez, `3` = tres llamadas por pedido). Los
+  componentes cuentan para su contenedor.
+- **Cuánto aguanta cada parte.** `load.capacity` por la cantidad de réplicas del ambiente: las de
+  sus instancias desplegadas; si no hay despliegue, las de `finops.costs.<ambiente>.replicas`; si
+  tampoco, una. Sin `load.capacity` se supone por tipo (un servicio, 300 por segundo; una base
+  relacional, 1.000; un caché, 20.000…) y el resultado lo marca como supuesto. Un sistema externo y
+  una app que corre en el dispositivo del usuario no tienen límite conocido.
+- **Qué pasa al saturar.** Una parte atiende hasta su capacidad y solo eso sigue hacia adelante.
+  Quien la llama en línea queda frenado. Lo que llega por un bus no frena a nadie: se acumula. Una
+  relación hacia un bus se toma como consumo si su etiqueta lo dice ("Consume eventos", "Escucha…").
 
 ## Flujos
 
@@ -332,6 +452,17 @@ Un template es un modelo de Aegon reutilizable. Hay dos tipos:
   proveedor de identidad, un productor y consumidores de Kafka…). Se inserta en un lienzo del nivel
   que corresponde: los IDs se generan de nuevo, los containers y componentes toman como `parent` el
   elemento que abre el lienzo y se copian los lienzos internos del bloque.
+
+Los **bloques de despliegue** son piezas de infraestructura para no arrancar un despliegue de
+cero: una red con subredes y balanceador, un clúster con namespaces, un datacenter con firewall y
+el borde web (DNS, CDN y WAF). Se insertan solo en lienzos `level: deployment`, y ahí no entran
+los bloques de C4. Vienen sin proveedor ni direcciones, para completar. Al insertarlos:
+
+- Cada nodo, infraestructura o instancia queda con `environments: [<ambiente del lienzo>]`.
+- Se conservan el anidado (`parent`) y el layout del bloque: cada marco envuelve a sus hijos.
+- Si el bloque se suelta dentro de un nodo del lienzo (doble click adentro), sus elementos de
+  primer nivel toman ese nodo como `parent`. Si no entra, el nodo y los que lo contienen crecen
+  para seguir envolviéndolo, y lo que tenían al lado se corre.
 
 Los templates incluidos vienen con la app. Los que guarda el usuario ("Guardar como template…"
 sobre una selección o sobre el workspace) quedan en la biblioteca local del navegador o de la app de

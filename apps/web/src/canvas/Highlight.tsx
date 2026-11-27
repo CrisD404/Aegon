@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { deployedIn, isExpandedInView, visualParentOf, type View } from '@aegon/core';
+import { deployedIn, isExpandedInView, statusOf, visualParentOf, type View } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import type { RelationFlowEdge } from './derive.ts';
@@ -8,7 +8,7 @@ import { focusSet, searchMatches } from './search.ts';
 const byId = (ids: Iterable<string>) =>
   [...ids].map((id) => `[data-id="${CSS.escape(id)}"]`).join(',');
 const labels = (ids: Iterable<string>) =>
-  [...ids].map((id) => `[data-testid="edge-label-${CSS.escape(id)}"]`).join(',');
+  [...ids].map((id) => `[data-edge-label="${CSS.escape(id)}"]`).join(',');
 
 /**
  * Resaltado del lienzo con una hoja de estilos generada (sin re-renderizar nodos): la búsqueda
@@ -28,6 +28,7 @@ export function CanvasHighlight({
   const search = useUi((s) => s.search);
   const costOverlay = useUi((s) => s.costOverlay);
   const costEnv = useUi((s) => s.costEnv);
+  const statusLens = useUi((s) => s.statusLens);
 
   const css = useMemo(() => {
     const scope = '.canvas-shell';
@@ -56,6 +57,20 @@ export function CanvasHighlight({
           `${scope} [data-id="${CSS.escape(current)}"] .c4-node { outline: 3px solid var(--accent); outline-offset: 3px; }`,
         ].join('\n'),
       );
+    }
+    if (statusLens) {
+      // Leyenda de estados: queda a la vista solo lo que está en ese estado (nodos, marcos y flechas).
+      const keepNodes = Object.keys(view.nodes).filter((id) => statusOf(model, id).status === statusLens);
+      const keepEdges = edges.filter((e) => e.data?.status === statusLens && !e.data.implied).map((e) => e.id);
+      const node = `${scope} .react-flow__node:not(.react-flow__node-boundary)`;
+      const rules = [keepNodes.length ? `${node}:not(:is(${byId(keepNodes)})) { opacity: 0.24; }` : `${node} { opacity: 0.24; }`];
+      if (keepEdges.length) {
+        rules.push(`${scope} .react-flow__edge:not(:is(${byId(keepEdges)})) { opacity: 0.12; }`);
+        rules.push(`${scope} .c4-edge-label:not(:is(${labels(keepEdges)})) { opacity: 0.18; }`);
+      } else {
+        rules.push(`${scope} .react-flow__edge, ${scope} .c4-edge-label { opacity: 0.12; }`);
+      }
+      return withEnv(rules.join('\n'));
     }
     if (focusMode && selected.length) {
       // Un elemento abierto en el lugar es todo lo que contiene: sus dependencias son las de adentro.
@@ -95,7 +110,7 @@ export function CanvasHighlight({
       return withEnv(rules.join('\n'));
     }
     return withEnv('');
-  }, [model, view, edges, focusMode, selected, search, costOverlay, costEnv]);
+  }, [model, view, edges, focusMode, selected, search, costOverlay, costEnv, statusLens]);
 
   return css ? <style data-testid="canvas-highlight">{css}</style> : null;
 }

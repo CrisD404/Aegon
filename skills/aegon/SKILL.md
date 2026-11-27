@@ -67,7 +67,7 @@ Modelá lo que piden y lo que la evidencia sostiene: no hay cantidad mínima ni 
 Lo que más errores evita:
 
 - Cada `add` responde con el ID que quedó (`✓ Contenedor "Web" agregado (web)`); después podés nombrar el elemento por ID o por nombre. Un nombre repetido **no falla**: crea `web-2`. Si te equivocaste, no repitas el `add`: corregí el YAML.
-- Hay una sola relación por par. `connect b a` cuando ya existe `a → b` la vuelve bidireccional; repetir `connect a b` con más opciones completa la que hay.
+- Hay una sola relación por par. `connect b a` cuando ya existe `a → b` la vuelve bidireccional (y lo que indiques queda como la vuelta); repetir `connect a b` con más opciones completa la que hay.
 - Sin `--view`, el elemento existe pero no se ve en ningún lienzo. Para ubicar uno que ya existe, agregá `<id>: { x: 0, y: 0 }` en `nodes` del lienzo y corré `layout`.
 - La CLI no modifica ni borra. Editá o borrá el YAML de la entidad (el nombre del archivo es el ID, y el ID no se cambia); al borrar un elemento, borrá también sus relaciones y sus entradas en `nodes`.
 - Copiá los nombres de campo de la referencia: un campo mal escrito no da error y se pierde en la siguiente escritura.

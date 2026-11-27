@@ -15,6 +15,8 @@ import {
   frameElements,
   pathLetter,
   relationForStep,
+  relationBack,
+  relationTechnology,
   representativeInView,
   stepTitle,
   viewForFrame,
@@ -402,14 +404,15 @@ function StepLine({ step, model }: { step: LeafStep; model: Model }) {
   };
   if (step.type === 'message') {
     const rel = relationForStep(model, step);
+    // Un paso que va al revés de la relación usa lo declarado para la vuelta, si lo hay.
+    const way = rel && step.from === rel.to ? (relationBack(rel) ?? rel) : rel;
+    const tech = way ? relationTechnology(way) : '';
     return (
       <span className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-fg-muted">
         {chip(step.from)}
         <ChevronRight size={13} className="text-accent" />
         {chip(step.to)}
-        {rel?.protocols?.length ? (
-          <span className="font-mono text-[11px] text-fg-subtle">[{rel.protocols.join(', ')}]</span>
-        ) : null}
+        {tech ? <span className="font-mono text-[11px] text-fg-subtle">[{tech}]</span> : null}
         {!rel ? <span className="text-[11px] text-warn">sin relación en el modelo</span> : null}
       </span>
     );

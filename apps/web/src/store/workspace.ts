@@ -149,6 +149,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     try {
       const next = entry.kind === 'op' ? applyOp(model, entry.op).model : entry.after;
       set({ model: next, past: [...past, entry], future: future.slice(0, -1) });
+      useUi.getState().toast(`Rehecho: ${entry.label}`);
     } catch (error) {
       useUi.getState().toast(`No se pudo rehacer: ${String((error as Error).message)}`, 'error');
     }

@@ -320,6 +320,11 @@ function ElementRow({ row, selected, onToggle }: { row: Extract<Row, { type: 'el
           <TechIcon icon={groupIcon ?? icon} label={label} size={14} />
         </span>
         <span className={cn('truncate', el.scope === 'external' && 'italic')}>{el.name}</span>
+        {(el.kind === 'node' || el.kind === 'infra' || el.kind === 'instance') && el.environments?.length ? (
+          <span className="shrink-0 rounded-xs bg-raised px-1 font-mono text-[9.5px] font-bold tracking-wide text-fg-subtle uppercase" title="Ambiente">
+            {el.environments.join(' ')}
+          </span>
+        ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-1">
           {row.inView ? <span className="h-1.5 w-1.5 rounded-full bg-accent" title="En el lienzo actual" /> : null}
           {'risk' in el && el.risk && (el.risk === 'high' || el.risk === 'critical') ? (

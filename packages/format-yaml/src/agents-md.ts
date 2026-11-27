@@ -48,7 +48,7 @@ attachments/                 # adjuntos que Aegon conserva tal cual
 | \`instance\` | despliegue | node | \`instance: { of, replicas }\` (\`of\`: el container, store, bus o system que despliega), \`addresses\`, \`resource\` |
 
 Campos comunes: \`name\`, \`description\` (corta), \`docs\` (Markdown), \`groups\` (IDs de grupos),
-\`scope\` (internal/external), \`status\` (planned/live/deprecated/retired), \`tags\`, \`owner\`, \`links\`,
+\`scope\` (internal/external), \`status\` (planned = nuevo / live / changing = se modifica / deprecated = se da de baja / retired), \`tags\`, \`owner\`, \`links\`,
 \`properties\` (clave → texto). \`risk\` (low/medium/high/critical) va en todo menos actor y group.
 \`technology\` (lenguajes, frameworks, plataformas) va solo en system, container y component: una
 base de datos se describe por su motor y un bus de mensajería por su broker.
@@ -128,10 +128,18 @@ protocols: [jdbc]
 - **Una relación por par de elementos.** Si la comunicación va en ambos sentidos usá
   \`direction: bidirectional\` en vez de dos relaciones.
 - \`protocols\` usa los IDs del catálogo de Aegon (\`https\`, \`rest\`, \`grpc\`, \`graphql\`, \`kafka\`,
-  \`amqp\`, \`jdbc\`, \`sql\`, \`tds\`, \`resp\`, \`s3-api\`, \`sftp\`, \`oidc\`, \`tcp\`, \`bgp\`…) y \`ports\` los
-  puertos de destino (\`ports: [443, 80]\`).
+  \`amqp\`, \`jdbc\`, \`sql\`, \`tds\`, \`resp\`, \`s3-api\`, \`sftp\`, \`oidc\`, \`tcp\`, \`bgp\`…). Para decir por
+  qué puertos va cada uno: \`protocols: [{ id: dns, ports: [53] }, { id: ntp, ports: [123] }]\`.
+  \`ports\` queda para puertos de destino sin protocolo (\`ports: [8080]\`).
+- En una relación bidireccional, \`label\` y \`protocols\` son los de la ida (\`from\` → \`to\`) y
+  \`back: { label, protocols }\` los de la vuelta, con los puertos por los que escucha \`from\`. El
+  lienzo muestra cada sentido con lo suyo.
 - Conectá los elementos más específicos posibles (container → container). Aegon dibuja las
   relaciones implícitas en los niveles superiores (sistema → sistema) automáticamente.
+- **Simulador de carga (opcional).** \`calls\` en una relación son las llamadas al destino por cada
+  pedido que atiende el origen (por defecto 1; \`0.2\` es uno de cada cinco). En un container, store,
+  bus o system, \`load: { capacity: 450 }\` es lo que atiende una réplica por segundo. Cargalos solo
+  si tenés el dato: lo que falta se supone por tipo y queda marcado como supuesto.
 
 ## Flujos y comentarios
 

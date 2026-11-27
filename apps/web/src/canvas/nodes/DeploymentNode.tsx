@@ -2,8 +2,9 @@ import { memo } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
 import { TechIcon } from '@aegon/icons';
 import { deploymentCaption, type DeploymentFlowNode } from '../derive.ts';
-import { CostBadge } from './ElementNode.tsx';
+import { CostBadge, StatusMark } from './ElementNode.tsx';
 import { NODE_TYPE_ICON, nodeProvider, providerTone } from './deployment-icons.tsx';
+import { MIN_NODE_SIZE } from './sizes.ts';
 
 const HANDLES = [
   { id: 't', position: Position.Top },
@@ -26,12 +27,13 @@ function DeploymentNodeImpl({ data, selected }: NodeProps<DeploymentFlowNode>) {
     <div
       className="c4-deploy"
       data-provider={providerTone(el.node.provider)}
-      data-status={el.status}
+      data-status={data.status}
       data-new={data.fresh || undefined}
       data-frame-id={el.id}
       data-testid={`deploy-${el.id}`}
     >
-      <NodeResizer isVisible={selected} minWidth={240} minHeight={140} />
+      <NodeResizer isVisible={selected} minWidth={MIN_NODE_SIZE.deployment.w} minHeight={MIN_NODE_SIZE.deployment.h} />
+      <StatusMark status={data.status} show={data.statusMark} />
       <div className="c4-deploy__edge" />
       <div className="c4-deploy__head">
         <span className="c4-deploy__icon" aria-hidden>

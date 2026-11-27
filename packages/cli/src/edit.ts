@@ -21,10 +21,13 @@ import {
   findTechnology,
   freePositions,
   placementProblem,
+  relationBackWith,
+  relationBetween,
   sortedValues,
   suggestProtocols,
   uniqueId,
   type CatalogItem,
+  type ProtocolUse,
   type ContainerType,
   type Direction,
   type Element,
@@ -288,9 +291,12 @@ export interface ConnectInput {
   to: string;
   label?: string;
   description?: string;
-  protocols?: string[];
+  /** IDs del catálogo; cada uno puede traer sus puertos (`dns:53`, o `{ id, ports }`). */
+  protocols?: (string | ProtocolUse)[];
   ports?: number[];
   direction?: Direction;
+  /** Lo que va en el otro sentido (de `to` hacia `from`): vuelve bidireccional la relación. */
+  back?: { label?: string; protocols?: (string | ProtocolUse)[] };
   status?: Status;
   tags?: string[];
 }
@@ -317,12 +323,20 @@ export function normalizeTechnologies(technologies: readonly string[], warnings:
   });
 }
 
-/** IDs del catálogo de protocolos (`HTTPS` → `https`, `gRPC` → `grpc`). */
-export function normalizeProtocols(protocols: readonly string[], warnings: string[]): string[] {
-  return protocols.map((p) => {
-    const id = catalogId(PROTOCOLS, p, findProtocol);
-    if (!id) warnings.push(`Protocolo "${p}" fuera del catálogo: se guarda tal cual`);
-    return id ?? p;
+/**
+ * Protocolos de una relación con los IDs del catálogo (`HTTPS` → `https`, `gRPC` → `grpc`). Cada uno
+ * puede traer sus puertos pegados con dos puntos y separados con barra: `dns:53`, `ldap:389/636`.
+ */
+export function normalizeProtocols(protocols: readonly (string | ProtocolUse)[], warnings: string[]): (string | ProtocolUse)[] {
+  return protocols.map((entry) => {
+    const text = typeof entry === 'string' ? /^(.+?):([\d/+]+)$/.exec(entry.trim()) : null;
+    const name = typeof entry === 'string' ? (text ? text[1]! : entry.trim()) : entry.id;
+    const ports = typeof entry === 'string' ? (text ? text[2]!.split(/[/+]/).filter(Boolean).map(Number) : []) : entry.ports;
+    const bad = ports.filter((p) => !Number.isInteger(p) || p < 1 || p > 65535);
+    if (bad.length) throw new WorkspaceError('invalid-field', `Puertos inválidos en "${name}": ${bad.join(', ')} (1 a 65535)`);
+    const id = catalogId(PROTOCOLS, name, findProtocol);
+    if (!id) warnings.push(`Protocolo "${name}" fuera del catálogo: se guarda tal cual`);
+    return ports.length ? { id: id ?? name, ports: [...new Set(ports)] } : (id ?? name);
   });
 }
 
@@ -343,14 +357,28 @@ export function planConnect(model: Model, input: ConnectInput): ConnectPlan {
   if (input.direction && input.direction !== 'outgoing') fields.direction = input.direction;
   if (input.status) fields.status = input.status;
   if (input.tags?.length) fields.tags = input.tags;
+  // Lo que va en el otro sentido: declararlo ya dice que la relación es de ida y vuelta.
+  const returning: { label?: string; protocols?: (string | ProtocolUse)[] } = {};
+  if (input.back?.label) returning.label = input.back.label;
+  if (input.back?.protocols?.length) returning.protocols = normalizeProtocols(input.back.protocols, warnings);
+  const hasReturn = Object.keys(returning).length > 0;
+  if (hasReturn) fields.direction = 'bidirectional';
   const suggestions = fields.protocols ? [] : suggestProtocols(model.elements[to], '', 3).map((p) => p.id);
 
+  const existing = relationBetween(model, from, to);
+  if (hasReturn && (!existing || existing.from === from)) fields.back = relationBackWith(existing?.back, returning) ?? undefined;
   const connected = connectOp(model, from, to, fields);
   const base = { id: connected.id, from, to, warnings, suggestions };
   if (connected.kind === 'created') return { ...base, op: connected.op, result: 'created' };
-  if (connected.kind === 'bidirectional') {
-    const patch: RelationPatch = { ...fields, direction: 'bidirectional' };
-    return { ...base, op: { type: 'relation.update', id: connected.id, patch }, result: 'bidirectional' };
+  if (existing && existing.from === to) {
+    // La relación ya existe al revés: lo indicado acá es su vuelta, y lo indicado como vuelta, su ida.
+    const { label, protocols, ports, direction: _direction, ...rest } = fields;
+    const back = relationBackWith(existing.back, { ...(label ? { label } : {}), ...(protocols ? { protocols } : {}), ...(ports ? { ports } : {}) });
+    const patch: RelationPatch = { ...rest, ...returning };
+    if (existing.direction !== 'bidirectional') patch.direction = 'bidirectional';
+    if (back && JSON.stringify(back) !== JSON.stringify(existing.back ?? null)) patch.back = back;
+    if (!Object.keys(patch).length) return { ...base, op: null, result: 'exists' };
+    return { ...base, op: { type: 'relation.update', id: connected.id, patch }, result: connected.kind === 'bidirectional' ? 'bidirectional' : 'updated' };
   }
   if (!Object.keys(fields).length) return { ...base, op: null, result: 'exists' };
   return { ...base, op: { type: 'relation.update', id: connected.id, patch: fields }, result: 'updated' };

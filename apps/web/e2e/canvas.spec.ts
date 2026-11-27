@@ -47,6 +47,7 @@ test('Alt + doble click abre el lienzo de detalle y los breadcrumbs suben', asyn
 
 test('un elemento existente se linkea en otro lienzo, no se duplica', async ({ page }) => {
   await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
+  await framed(page, 'home-banking-containers');
   await expect(page.getByTestId('node-web-app')).toBeVisible();
   const p = await emptyPoint(page);
   await page.mouse.dblclick(p.x, p.y);
@@ -58,6 +59,7 @@ test('un elemento existente se linkea en otro lienzo, no se duplica', async ({ p
 
 test('si lo escrito coincide con algo del modelo, Enter lo reutiliza en vez de duplicarlo', async ({ page }) => {
   await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
+  await framed(page, 'home-banking-containers');
   await expect(page.getByTestId('node-web-app')).toBeVisible();
   const p = await emptyPoint(page);
   await page.mouse.dblclick(p.x, p.y);
@@ -252,11 +254,16 @@ test('doble click abre un sistema en el lugar, con sus contenedores adentro, y s
   await expect(frame).toBeVisible();
   await expect(frame).toContainText('8 contenedores');
   await expect(page.getByTestId('breadcrumbs')).not.toContainText('Home Banking');
-  const outer = (await frame.boundingBox())!;
-  for (const id of ['web-app', 'api-gateway', 'pagos-api', 'banking-db']) {
-    const inner = (await page.getByTestId(`node-${id}`).boundingBox())!;
-    expect(inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height).toBe(true);
-  }
+  // Todas las medidas en el mismo instante: el lienzo todavía puede estar encuadrando el marco.
+  const outside = await page.evaluate(() => {
+    const box = (testId: string) => document.querySelector(`[data-testid="${testId}"]`)!.getBoundingClientRect();
+    const outer = box('open-home-banking');
+    return ['web-app', 'api-gateway', 'pagos-api', 'banking-db'].filter((id) => {
+      const inner = box(`node-${id}`);
+      return !(inner.left >= outer.left && inner.top >= outer.top && inner.right <= outer.right && inner.bottom <= outer.bottom);
+    });
+  });
+  expect(outside).toEqual([]);
   expect(await changesCount(page)).toBeGreaterThan(0);
 
   // Se cierra desde el encabezado y el lienzo vuelve a estar como antes.
@@ -322,6 +329,7 @@ test('el panel Salud lista lo que conviene revisar y lleva al elemento', async (
   await page.getByTestId('tab-health').click();
   await expect(page.getByTestId('health-summary')).toHaveText('Sin problemas');
   await page.getByTestId('health-panel').getByText('Motor antifraude').click();
+  await framed(page, 'pagos-api-components');
   await expect(page.getByTestId('breadcrumbs')).toContainText('Pagos API');
 
   // Un contenedor nuevo de un sistema que ya tiene despliegue es un aviso (todavía no se desplegó):

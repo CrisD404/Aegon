@@ -142,7 +142,7 @@ function ViewSettings() {
             checked={snap}
             onChange={(v) => setPref('snap', v)}
             label="Ajustar a la grilla"
-            description="Con Shift al arrastrar, guías de alineación"
+            description="Con Shift al arrastrar o redimensionar, guías de alineación"
           />
         </SettingRow>
         <SettingRow keys="R">

@@ -1,5 +1,6 @@
 export * from './schema/index.ts';
 export * from './model/index.ts';
+export * from './model/status.ts';
 export * from './ops/index.ts';
 export * from './rules/index.ts';
 export * from './diff/index.ts';
@@ -16,3 +17,6 @@ export * from './templates/index.ts';
 export * from './finops/index.ts';
 export * from './flows/index.ts';
 export * from './deployment/index.ts';
+export * from './deployment/plan.ts';
+export * from './deployment/convert.ts';
+export * from './sim/index.ts';

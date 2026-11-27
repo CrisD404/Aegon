@@ -378,6 +378,54 @@ function arrangeNestedOp(model: Model, view: View): Op | null | undefined {
 }
 
 /**
+ * Agranda los marcos que contienen a `around` (y los que contienen a esos) lo justo para que los
+ * sigan envolviendo con margen. Nunca achica ni mueve lo de adentro: un tamaño puesto a mano se
+ * respeta, y lo que ya estaba cerca de un borde no cuenta. Null si ya los contenían.
+ */
+export function growFramesOp(model: Model, viewId: Id, around: readonly Id[]): Op | null {
+  const view = model.views[viewId];
+  if (!view) return null;
+  const rects = new Map<Id, { x: number; y: number; w: number; h: number }>();
+  const rectOf = (id: Id) => {
+    const known = rects.get(id);
+    if (known) return known;
+    const el = model.elements[id];
+    const layout = view.nodes[id];
+    if (!el || !layout) return undefined;
+    const rect = { x: layout.x, y: layout.y, ...sizeOf(el, layout) };
+    rects.set(id, rect);
+    return rect;
+  };
+  const nodes: Record<Id, NodeLayout> = {};
+  for (const start of around) {
+    let child = rectOf(start);
+    const seen = new Set<Id>([start]);
+    let frame = model.elements[start] ? visualParentOf(model, view, model.elements[start]!) : undefined;
+    while (child && frame && !seen.has(frame)) {
+      seen.add(frame);
+      const el = model.elements[frame]!;
+      const prev = rectOf(frame);
+      if (!prev) break;
+      // Un elemento abierto en el lugar se ajusta justo a su contenido: de eso se ocupa `fitExpandedOp`.
+      if (el.kind === 'node' || el.kind === 'group') {
+        const x = Math.min(prev.x, Math.round(child.x - FRAME_PADDING.side));
+        const y = Math.min(prev.y, Math.round(child.y - FRAME_PADDING.top));
+        const right = Math.max(prev.x + prev.w, Math.round(child.x + child.w + FRAME_PADDING.side));
+        const bottom = Math.max(prev.y + prev.h, Math.round(child.y + child.h + FRAME_PADDING.bottom));
+        const next = { x, y, w: right - x, h: bottom - y };
+        if (next.x !== prev.x || next.y !== prev.y || next.w !== prev.w || next.h !== prev.h) {
+          rects.set(frame, next);
+          nodes[frame] = next;
+        }
+      }
+      child = rects.get(frame);
+      frame = visualParentOf(model, view, el);
+    }
+  }
+  return Object.keys(nodes).length ? { type: 'view.place', view: viewId, nodes } : null;
+}
+
+/**
  * Ajusta cada marco (nodo de despliegue o grupo) a lo que contiene, de adentro hacia afuera, sin
  * mover nada más: deja el margen de la etiqueta arriba y el de los costados. Null si ya estaban.
  */

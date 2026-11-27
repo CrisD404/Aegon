@@ -3,6 +3,7 @@ import { DropdownMenu } from 'radix-ui';
 import { Check, FilePlus2, FolderPlus, LayoutTemplate, MoreHorizontal, Pencil, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
 import {
   blockProblem,
+  levelLabel,
   sizeOf,
   templateMainView,
   templateStats,
@@ -34,7 +35,7 @@ export function TemplatePreview({ template, className }: { template: Template; c
         <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} style={{ stroke: 'var(--edge)', strokeWidth: box.w / 260 }} />
       ))}
       {rects.map((r) => {
-        const frame = r.kind === 'group' || r.frame;
+        const frame = r.kind === 'group' || r.kind === 'node' || r.frame;
         return (
           <rect
             key={r.id}
@@ -118,7 +119,7 @@ function KindBadge({ t }: { t: Template }) {
   const level = templateStats(t).level;
   return (
     <span className={cn('rounded-full px-2 py-0.5 text-[10.5px] font-semibold', t.kind === 'workspace' ? 'bg-accent-soft text-accent' : 'bg-raised text-fg-muted')}>
-      {t.kind === 'workspace' ? 'Workspace' : `Bloque · L${level ?? '?'}`}
+      {t.kind === 'workspace' ? 'Workspace' : `Bloque · ${level ? levelLabel(level) : 'L?'}`}
     </span>
   );
 }
@@ -456,7 +457,7 @@ export function SaveTemplateDialog({ template, close }: { template: Template; cl
       title={template.kind === 'block' ? 'Guardar bloque como template' : 'Guardar workspace como template'}
       description={
         template.kind === 'block'
-          ? `Lo vas a poder insertar en cualquier lienzo de nivel ${level} desde Templates o con doble click en el lienzo.`
+          ? `Lo vas a poder insertar en cualquier lienzo de ${level === 'deployment' ? 'despliegue' : `nivel ${level}`} desde Templates o con doble click en el lienzo.`
           : 'Aparece como punto de partida al crear un workspace nuevo.'
       }
       testId="save-template-dialog"

@@ -1,9 +1,10 @@
 import { idFromName, relationIdFor, uniqueId } from '../ids/index.ts';
 import { descendantsOf, type Model } from '../model/index.ts';
 import { OpError, type Op } from '../ops/index.ts';
-import { KIND_LABEL, scopedParentFor, sizeOf } from '../ops/commands.ts';
-import { KINDS_FOR_LEVEL, levelRank } from '../rules/hierarchy.ts';
-import { SCHEMA_VERSION, type EdgeStyle, type Element, type Id, type Level, type NodeLayout, type Relation, type View } from '../schema/index.ts';
+import { KIND_LABEL, scopedParentFor, shiftEdgeStyle, sizeOf } from '../ops/commands.ts';
+import { KINDS_FOR_LEVEL, canHaveParent, levelRank } from '../rules/hierarchy.ts';
+import { DEPLOYMENT_KINDS, SCHEMA_VERSION, type EdgeStyle, type Element, type Id, type Level, type NodeLayout, type Relation, type View } from '../schema/index.ts';
+import { hostNodeAt, roomInside } from './nest.ts';
 
 /**
  * Templates: piezas reutilizables con el mismo formato que un workspace (un `Model`).
@@ -12,6 +13,8 @@ import { SCHEMA_VERSION, type EdgeStyle, type Element, type Id, type Level, type
  * - **block**: un conjunto de elementos, relaciones y layout (ej. "API Gateway + servicios")
  *   que se inserta en un lienzo con IDs nuevos. Sus elementos de primer nivel no tienen padre:
  *   al insertarlos heredan el del lienzo destino (el sistema abierto en L2, el container en L3).
+ *   Los bloques de despliegue (una red con sus subredes, un clúster con namespaces) van solo en
+ *   lienzos de despliegue: quedan en el ambiente del lienzo y, si caen dentro de un nodo, adentro.
  */
 
 export type TemplateKind = 'workspace' | 'block';
@@ -59,6 +62,11 @@ const LEVEL_NAME: Record<Level, string> = { 1: 'contexto (L1)', 2: 'contenedores
 export function blockProblem(template: Template, view: View): string | null {
   const main = templateMainView(template);
   if (template.kind !== 'block' || !main) return 'Solo los bloques se insertan en un lienzo';
+  // Despliegue y C4 no se mezclan: un bloque de despliegue va solo en un lienzo de despliegue, y
+  // ahí no entra uno de C4 (aunque sus tipos, como actores y sistemas, se puedan ubicar).
+  if ((main.level === 'deployment') !== (view.level === 'deployment')) {
+    return `"${template.name}" es un bloque de ${LEVEL_NAME[main.level]}: insertalo en un lienzo de ${LEVEL_NAME[main.level]}`;
+  }
   for (const id of Object.keys(main.nodes)) {
     const el = template.model.elements[id];
     if (el && !KINDS_FOR_LEVEL[view.level].includes(el.kind)) {
@@ -124,7 +132,8 @@ export function templateFromSelection(
     nodes[id] = { ...layout, x: layout.x - minX, y: layout.y - minY };
   }
   const edges: Record<Id, EdgeStyle> = {};
-  for (const [relId, style] of Object.entries(view.edges ?? {})) if (relations[relId]) edges[relId] = style;
+  // Los recorridos a mano se guardan relativos al bloque, igual que los nodos.
+  for (const [relId, style] of Object.entries(view.edges ?? {})) if (relations[relId]) edges[relId] = shiftEdgeStyle(style, -minX, -minY);
 
   const views: Record<Id, View> = {
     [BLOCK_VIEW]: { id: BLOCK_VIEW, name: meta.name, level: view.level, nodes, ...(Object.keys(edges).length ? { edges } : {}) },
@@ -198,12 +207,30 @@ function nearestFreeOrigin(model: Model, view: View, origin: { x: number; y: num
   return origin;
 }
 
+export interface InsertBlockOptions {
+  /**
+   * Despliegue: si `at` cae dentro de un nodo del lienzo, el bloque queda adentro (por defecto).
+   * Con `false` va siempre suelto: es lo que conviene cuando el punto no lo eligió el usuario.
+   */
+  nest?: boolean;
+}
+
 /**
  * Inserta un bloque en un lienzo, centrado en `at` o en el lugar libre más cercano (no pisa
  * nodos existentes). Los elementos reciben IDs nuevos (a partir de sus nombres), los de primer
  * nivel heredan el padre del lienzo y se copian también los lienzos de detalle que traiga el bloque.
+ *
+ * En un lienzo de despliegue, lo insertado queda en el ambiente del lienzo y, si `at` cae dentro
+ * de un nodo, los elementos de primer nivel pasan a ser hijos suyos: el bloque se acomoda adentro
+ * y el nodo (con los que lo contienen) crece si hace falta para seguir envolviéndolo.
  */
-export function instantiateBlockOp(model: Model, template: Template, viewId: Id, at: { x: number; y: number }): { op: Op; ids: Id[] } {
+export function instantiateBlockOp(
+  model: Model,
+  template: Template,
+  viewId: Id,
+  at: { x: number; y: number },
+  options: InsertBlockOptions = {},
+): { op: Op; ids: Id[] } {
   const view = model.views[viewId];
   if (!view) throw new OpError('not-found', `No existe el lienzo "${viewId}"`);
   const problem = blockProblem(template, view);
@@ -221,6 +248,15 @@ export function instantiateBlockOp(model: Model, template: Template, viewId: Id,
     idMap.set(id, next);
   }
 
+  // Despliegue: el nodo del lienzo donde cae el bloque (si alguno de sus elementos de primer
+  // nivel puede colgar de un nodo) y el ambiente en el que queda lo insertado.
+  const deployment = view.level === 'deployment';
+  const isTopLevel = (el: Element) => !(el.parent && idMap.has(el.parent));
+  const nestable = (el: Element) => isTopLevel(el) && canHaveParent(el.kind, 'node');
+  const host =
+    deployment && options.nest !== false && Object.values(src.elements).some(nestable) ? hostNodeAt(model, view, at) : undefined;
+  const environment = deployment ? view.environment : undefined;
+
   const ops: Op[] = [];
   for (const id of order) {
     const el = src.elements[id]!;
@@ -228,9 +264,12 @@ export function instantiateBlockOp(model: Model, template: Template, viewId: Id,
     if (el.parent && idMap.has(el.parent)) copy.parent = idMap.get(el.parent)!;
     else {
       delete copy.parent;
-      const parent = scopedParentFor(model, view, el.kind);
+      const parent = host && nestable(el) ? host : scopedParentFor(model, view, el.kind);
       if (parent) copy.parent = parent;
     }
+    // Nodos, infraestructura e instancias existen en el ambiente del lienzo. Un actor o un sistema
+    // valen para todos los ambientes salvo que el bloque los limite: ahí también pasan a este.
+    if (environment && ((DEPLOYMENT_KINDS as readonly string[]).includes(el.kind) || el.environments)) copy.environments = [environment];
     if (el.groups) {
       const groups = el.groups.filter((g) => idMap.has(g)).map((g) => idMap.get(g)!);
       if (groups.length) copy.groups = groups;
@@ -251,20 +290,22 @@ export function instantiateBlockOp(model: Model, template: Template, viewId: Id,
     ops.push({ type: 'relation.add', relation: { ...rel, id, from, to } });
   }
 
-  // Layout del bloque centrado en el punto de inserción (o corrido hasta un lugar libre).
+  // Layout del bloque centrado en el punto de inserción (o corrido hasta un lugar libre). Dentro
+  // de un nodo de despliegue, el lugar se busca adentro y los marcos crecen si no entra.
   const rects = Object.entries(main.nodes).map(([id, l]) => ({ id, ...l, ...sizeOf(src.elements[id]!, l) }));
   const width = Math.max(...rects.map((r) => r.x + r.w));
   const height = Math.max(...rects.map((r) => r.y + r.h));
-  const origin = nearestFreeOrigin(model, view, { x: Math.round(at.x - width / 2), y: Math.round(at.y - height / 2) }, width, height);
-  const nodes: Record<Id, NodeLayout> = {};
+  const centered = { x: Math.round(at.x - width / 2), y: Math.round(at.y - height / 2) };
+  const room = host ? roomInside(model, view, host, centered, width, height) : { origin: nearestFreeOrigin(model, view, centered, width, height), nodes: {} };
+  const nodes: Record<Id, NodeLayout> = { ...room.nodes };
   for (const r of rects) {
     const layout = main.nodes[r.id]!;
-    nodes[idMap.get(r.id)!] = { ...layout, x: origin.x + layout.x, y: origin.y + layout.y };
+    nodes[idMap.get(r.id)!] = { ...layout, x: room.origin.x + layout.x, y: room.origin.y + layout.y };
   }
   ops.push({ type: 'view.place', view: view.id, nodes });
   for (const [relId, style] of Object.entries(main.edges ?? {})) {
     const id = relMap.get(relId);
-    if (id) ops.push({ type: 'view.edge', view: view.id, relation: id, style });
+    if (id) ops.push({ type: 'view.edge', view: view.id, relation: id, style: shiftEdgeStyle(style, room.origin.x, room.origin.y) });
   }
 
   // Lienzos de detalle (L2/L3) de los elementos del bloque.

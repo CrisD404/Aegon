@@ -30,9 +30,10 @@ const ORDER = {
   element: [
     'id', 'kind', 'name', 'description', 'parent', 'groups', 'scope', 'status', 'risk', 'technology',
     'containerType', 'role', 'store', 'bus', 'group', 'node', 'infra', 'instance', 'addresses', 'resource', 'owner',
-    'tags', 'links', 'environments', 'finops', 'properties', 'docs', 'extensions',
+    'tags', 'links', 'environments', 'finops', 'load', 'properties', 'docs', 'extensions',
   ],
-  relation: ['id', 'from', 'to', 'label', 'description', 'protocols', 'ports', 'direction', 'status', 'tags', 'properties', 'extensions'],
+  relation: ['id', 'from', 'to', 'label', 'description', 'protocols', 'ports', 'direction', 'back', 'calls', 'status', 'tags', 'properties', 'extensions'],
+  back: ['label', 'protocols', 'ports'],
   view: ['id', 'name', 'level', 'scope', 'environment', 'description', 'nodes', 'edges', 'expanded', 'folded', 'extensions'],
   store: ['engine', 'customEngine', 'customIcon', 'type', 'version', 'managed'],
   bus: ['broker', 'customBroker', 'customIcon', 'type', 'topics'],
@@ -41,7 +42,7 @@ const ORDER = {
   instance: ['of', 'replicas'],
   layout: ['x', 'y', 'w', 'h'],
   link: ['label', 'url'],
-  edge: ['shape', 'hidden'],
+  edge: ['shape', 'hidden', 'from', 'to', 'points', 'labelAt', 'backLabelAt'],
   environment: ['id', 'name'],
   finopsSettings: ['currency', 'tagKeys', 'budgets'],
   finops: ['costs', 'tags'],
@@ -89,7 +90,9 @@ export function canonicalElement(el: Element, environments: readonly string[] = 
 }
 
 export function canonicalRelation(rel: Relation): Record<string, unknown> {
-  return ordered({ ...rel }, ORDER.relation);
+  const value: Record<string, unknown> = { ...rel };
+  if (rel.back) value.back = ordered(rel.back, ORDER.back);
+  return ordered(value, ORDER.relation);
 }
 
 export function canonicalView(view: View): Record<string, unknown> {

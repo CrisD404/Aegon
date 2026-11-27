@@ -35,6 +35,7 @@ function tagsOf(model: Model, el: Element): string[] {
   if (el.kind === 'bus') tags.push('Queue');
   if (isExternalDeep(model, el)) tags.push('Externo');
   if (el.status === 'planned') tags.push('Planificado');
+  if (el.status === 'changing') tags.push('Modificado');
   if (el.status === 'deprecated') tags.push('Deprecado');
   for (const t of el.tags ?? []) tags.push(t);
   return tags;

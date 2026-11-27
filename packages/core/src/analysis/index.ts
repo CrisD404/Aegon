@@ -1,7 +1,7 @@
 import { ancestorsOf, descendantsOf, sortedValues, type Model } from '../model/index.ts';
 import type { ElementKind, Id, Risk, Status } from '../schema/index.ts';
-import { suggestProtocols } from '../catalog/index.ts';
-import { inEnvironment, isNetworkRelation } from '../deployment/index.ts';
+import { relationUsage, suggestProtocols } from '../catalog/index.ts';
+import { inEnvironment, isNetworkRelation, isProductionEnvironment, systemsInPlay, undeployedIn } from '../deployment/index.ts';
 import { validateModel, type Diagnostic } from '../rules/index.ts';
 
 /**
@@ -117,8 +117,9 @@ function c4StyleViolations(model: Model): Diagnostic[] {
     if ((from.kind === 'actor' && to.kind === 'store') || (from.kind === 'store' && to.kind === 'actor')) {
       out.push({ severity: 'warning', code: 'actor-to-store', message: `"${from.name}" → "${to.name}": una persona no accede directo a una base de datos; pasá por el contenedor que la usa`, entity });
     }
-    // Tráfico sin cifrar: HTTP sin TLS o puerto 80.
-    if (rel.protocols?.includes('http') || rel.ports?.includes(80)) {
+    // Tráfico sin cifrar: HTTP sin TLS o puerto 80, en cualquiera de los dos sentidos.
+    const usage = relationUsage(rel);
+    if (usage.protocols.includes('http') || usage.ports.includes(80)) {
       out.push({ severity: 'warning', code: 'plaintext', message: `"${from.name}" → "${to.name}" viaja sin cifrar (HTTP o puerto 80)`, entity });
     }
   }
@@ -134,24 +135,44 @@ function deploymentCoverage(model: Model): Diagnostic[] {
   const out: Diagnostic[] = [];
   const views = sortedValues(model.views).filter((v) => v.level === 'deployment' && v.environment);
   const envs = [...new Set(views.map((v) => v.environment!))];
-  const instances = sortedValues(model.elements).filter((el) => el.kind === 'instance');
+  const envName = (env: Id) => model.workspace.environments?.find((e) => e.id === env)?.name ?? env;
   for (const env of envs) {
-    const deployed = new Set(instances.filter((i) => i.kind === 'instance' && inEnvironment(i, env)).map((i) => (i.kind === 'instance' ? i.instance.of : '')));
-    // Sistemas en juego: los de los lienzos de ese ambiente y los que ya tienen algo desplegado.
-    const systems = new Set<Id>(views.filter((v) => v.environment === env && v.scope).map((v) => v.scope!));
-    for (const id of deployed) {
-      const sys = [model.elements[id], ...ancestorsOf(model, id)].find((e) => e?.kind === 'system');
-      if (sys && model.elements[id]?.kind !== 'system') systems.add(sys.id);
+    for (const el of undeployedIn(model, env, systemsInPlay(model, env))) {
+      out.push({ severity: 'warning', code: 'not-deployed', message: `"${el.name}" no tiene ninguna instancia en ${envName(env)}`, entity: { type: 'element', id: el.id } });
     }
-    const envName = model.workspace.environments?.find((e) => e.id === env)?.name ?? env;
-    for (const sys of systems) {
-      for (const id of descendantsOf(model, sys)) {
-        const el = model.elements[id];
-        if (!el || !(el.kind === 'container' || el.kind === 'store' || el.kind === 'bus')) continue;
-        if (!inEnvironment(el, env) || deployed.has(id)) continue;
-        out.push({ severity: 'warning', code: 'not-deployed', message: `"${el.name}" no tiene ninguna instancia en ${envName}`, entity: { type: 'element', id } });
-      }
-    }
+  }
+  out.push(...singleReplicas(model, envs));
+  return out;
+}
+
+/**
+ * Punto único de falla: algo propio de riesgo alto o crítico que en producción corre con una sola
+ * réplica, en un nodo que tampoco está repetido. En los demás ambientes una réplica es lo normal.
+ */
+function singleReplicas(model: Model, envs: readonly Id[]): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  const production = envs.filter((env) => isProductionEnvironment(model, env));
+  if (!production.length) return out;
+  for (const el of sortedValues(model.elements)) {
+    if (el.kind !== 'instance') continue;
+    const target = model.elements[el.instance.of];
+    if (!target || target.scope === 'external' || !('risk' in target) || !target.risk || RISK_WEIGHT[target.risk] < RISK_WEIGHT.high) continue;
+    const env = production.find((e) => inEnvironment(el, e));
+    if (!env) continue;
+    // Réplicas efectivas: las de la instancia por la cantidad de nodos iguales que la alojan.
+    let copies = el.instance.replicas ?? 1;
+    for (const host of ancestorsOf(model, el.id)) if (host.kind === 'node') copies *= host.node.instances ?? 1;
+    if (copies > 1) continue;
+    // Otra instancia del mismo elemento en ese ambiente también es redundancia.
+    const siblings = sortedValues(model.elements).filter((o) => o.kind === 'instance' && o.id !== el.id && o.instance.of === target.id && inEnvironment(o, env));
+    if (siblings.length) continue;
+    const name = model.workspace.environments?.find((e) => e.id === env)?.name ?? env;
+    out.push({
+      severity: 'warning',
+      code: 'single-replica',
+      message: `"${target.name}" tiene riesgo ${RISK_TEXT[target.risk]} y en ${name} corre con una sola réplica`,
+      entity: { type: 'element', id: el.id },
+    });
   }
   return out;
 }
@@ -343,7 +364,7 @@ function findHotspots(model: Model): Hotspot[] {
     }
     if ((el.status === 'deprecated' || el.status === 'retired') && deps.length) {
       score += 3 * deps.length;
-      reasons.push(`${el.status === 'deprecated' ? 'deprecado' : 'retirado'} y todavía lo usan ${deps.length}`);
+      reasons.push(`${el.status === 'deprecated' ? 'se da de baja' : 'retirado'} y todavía lo usan ${deps.length}`);
     }
     if (!risk && deps.length >= 5) {
       score += deps.length;

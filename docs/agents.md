@@ -110,7 +110,7 @@ En Claude Desktop, Cursor u otro cliente MCP la configuración es la misma (`com
 | `search_catalog` | IDs válidos de tecnologías, motores, brokers, protocolos (ordenados según el destino) y proveedores |
 | `add_element` | Crea un elemento; con `view` lo ubica en un lugar libre y en un L2/L3 hereda el padre |
 | `update_element` / `remove_element` | `patch` con los campos a cambiar (`null` borra); eliminar es en cascada |
-| `connect` | Relación `from → to` respetando una por par (al revés la vuelve bidireccional) |
+| `connect` | Relación `from → to` respetando una por par (al revés la vuelve bidireccional); `back` declara lo que va en el otro sentido |
 | `update_relation` / `remove_relation` | Ídem para relaciones |
 | `create_view` / `update_view` / `remove_view` | Lienzos L1 |
 | `create_child_view` | Abre (o crea, con hijos y vecinos ya ubicados) el L2 de un sistema o el L3 de un contenedor |
@@ -127,6 +127,7 @@ En Claude Desktop, Cursor u otro cliente MCP la configuración es la misma (`com
 | `reply_comment` / `resolve_comment` / `delete_comment` | Responder, resolver (o reabrir con `resolved: false`) y borrar |
 | `validate` | Sintaxis, esquema, referencias y reglas C4 (`ok: false` si hay errores) |
 | `analyze` | Huérfanos, ciclos de dependencias, violaciones C4, relaciones sin protocolo y hotspots de riesgo |
+| `simulate` | Simulación de carga: uso de cada parte con un tráfico dado, qué se satura, a quién frena y hasta cuánto aguanta (es un modelo: marca las capacidades supuestas) |
 | `export` | Mermaid, C4-PlantUML, Structurizr DSL o JSON |
 
 Las herramientas aceptan IDs o nombres exactos (`"Home Banking"` → `home-banking`). Los errores
@@ -288,6 +289,7 @@ Los elementos y lienzos se indican por ID o por nombre.
 | `aegon flow <id>` | Un flujo con sus pasos numerados (`1`, `5A.2`) y sus avisos; con `--json`, además el YAML y la relación de cada mensaje |
 | `aegon export flow <id> mermaid\|text [-o archivo]` | Un flujo como diagrama de secuencia de Mermaid o como texto numerado |
 | `aegon comments [--open\|--resolved] [--view id] [--element id]` | Comentarios de los lienzos con sus respuestas |
+| `aegon simulate <pedidos-por-segundo> [--env id] [--system id] [--strict]` | Simula carga: cuánto le llega a cada parte, qué se satura primero y hasta cuánto aguanta. Con `--strict` sale con 1 si algo se satura |
 
 ```bash
 aegon add container "Conciliador" --view home-banking-containers -t java,spring-boot --container-type worker
@@ -298,6 +300,7 @@ aegon export mermaid --view home-banking-containers -o docs/contenedores.md
 aegon flow transferencia
 aegon export flow transferencia mermaid -o docs/transferencia.mmd
 aegon comments --open
+aegon simulate 1500 --system home-banking
 ```
 
 La CLI lee flujos y comentarios; para crearlos o editarlos usá la app o el servidor MCP.

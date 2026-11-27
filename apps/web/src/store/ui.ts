@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import type { ElementKind, Id, Level } from '@aegon/core';
+import type { ElementKind, Id, Level, Status } from '@aegon/core';
 import { loadPrefs, savePrefs } from '../lib/persist.ts';
 
 export type ThemePref = 'system' | 'light' | 'dark';
 export type GridMode = 'dots' | 'lines' | 'none';
-export type RightTab = 'inspector' | 'changes' | 'costs' | 'comments' | 'health';
+export type RightTab = 'inspector' | 'changes' | 'costs' | 'comments' | 'health' | 'load';
 export type SidebarTab = 'model' | 'groups' | 'views' | 'flows';
 
 /** Ubicación de un paso: `[i]` en el flujo o `[i, camino, j]` dentro de una bifurcación. */
@@ -52,6 +52,12 @@ interface Prefs {
   commentAuthor: string;
   /** Ambiente elegido para costos (null = todos). */
   costEnv: string | null;
+  /** Modo Simular: el lienzo muestra cuánto tráfico le llega a cada parte. */
+  simulate: boolean;
+  /** Tráfico que entra en la simulación, en pedidos por segundo. */
+  simRps: number;
+  /** Ambiente del que salen las réplicas al simular (null = el productivo). */
+  simEnv: string | null;
   sidebarOpen: boolean;
   rightOpen: boolean;
   sidebarTab: SidebarTab;
@@ -107,6 +113,9 @@ interface UiState extends Prefs {
   /** Búsqueda en el lienzo activo (Ctrl+F). */
   search: { open: boolean; query: string; index: number };
   setSearch(patch: Partial<UiState['search']>): void;
+  /** Estado que se está mirando desde la leyenda del lienzo: lo demás se atenúa. */
+  statusLens: Status | null;
+  setStatusLens(status: Status | null): void;
   /** Diálogo de GitHub abierto: vincular el workspace actual o abrir uno del repo. */
   githubDialog: 'link' | 'open' | null;
   setGitHubDialog(mode: 'link' | 'open' | null): void;
@@ -135,6 +144,9 @@ const PREF_DEFAULTS: Prefs = {
   focusMode: true,
   costOverlay: false,
   costEnv: null,
+  simulate: false,
+  simRps: 200,
+  simEnv: null,
   showComments: true,
   commentAuthor: '',
   sidebarOpen: true,
@@ -211,6 +223,10 @@ export const useUi = create<UiState>((set, get) => ({
   setSearch(patch) {
     set({ search: { ...get().search, ...patch } });
   },
+  statusLens: null,
+  setStatusLens(status) {
+    set({ statusLens: status });
+  },
   setGitHubDialog(mode) {
     set({ githubDialog: mode });
   },
@@ -239,6 +255,7 @@ export const useUi = create<UiState>((set, get) => ({
       selection: { nodes: opts.focus ? [opts.focus] : [], edges: [] },
       ghost: null,
       search: { ...get().search, index: 0 },
+      statusLens: null,
     });
   },
 

@@ -53,7 +53,7 @@ Agrega un elemento y responde con su ID. `kind`: `actor`, `system`, `container`,
 | `--addresses <a,b>` · `--resource <id>` | Direcciones e ID de recurso (`node`, `infra`, `instance`) |
 | `--env <a,b>` | Ambientes donde existe |
 | `--external` | Fuera de la organización (`scope: external`) |
-| `--status <estado>` · `--risk <riesgo>` | `planned`, `live`, `deprecated`, `retired` · `low`, `medium`, `high`, `critical` |
+| `--status <estado>` · `--risk <riesgo>` | `planned` (nuevo), `live`, `changing` (se modifica), `deprecated` (se da de baja), `retired` · `low`, `medium`, `high`, `critical` |
 | `--group <id>` | Grupo al que pertenece (repetible) |
 | `--tags <a,b>` · `--owner <equipo>` | Etiquetas y responsable |
 
@@ -63,8 +63,8 @@ Una opción que no aplica al tipo se ignora con un aviso. Un nombre repetido no 
 
 Crea la relación `desde → hasta` (ID `<desde>--<hasta>`).
 
-- `-l, --label <texto>`, `-d, --description <texto>`, `-p, --protocols <a,b>`, `--ports <443,8080>`, `--bidirectional`, `--status <estado>`.
-- Si ya existe en sentido contrario, la vuelve bidireccional. Si ya existe en ese sentido, la completa con lo indicado.
+- `-l, --label <texto>`, `-d, --description <texto>`, `-p, --protocols <a,b>` (cada uno puede llevar sus puertos: `dns:53,ldap:389/636`), `--ports <8080>` (puertos sin protocolo), `--bidirectional`, `--back-label <texto>` y `--back-protocols <a,b>` (lo que va en el otro sentido, de `hasta` hacia `desde`; con cualquiera de los dos queda bidireccional), `--status <estado>`.
+- Si ya existe en sentido contrario, la vuelve bidireccional y lo indicado (`-l`, `-p`) queda como su vuelta, sin tocar la ida. Si ya existe en ese sentido, la completa con lo indicado.
 - Sin `-p`, sugiere protocolos según el destino.
 - Falla con `[not-found]` si un extremo no existe, `[invalid-endpoint]` si es un grupo y `[self-relation]` si los dos extremos son el mismo.
 
@@ -92,6 +92,17 @@ Lo mismo que `validate` más el análisis: violaciones de estilo C4, huérfanos 
 - `--hotspots <n>`: cuántos hotspots mostrar (10 por defecto).
 
 Con `--json`, los dos traen `ok` y `workspace`. Los diagnósticos (`severity`, `code`, `message`, `file`) vienen en `diagnostics` en `validate` y en `violations` en `lint`, que suma `orphans`, `cycles`, `missingProtocols`, `hotspots` y `summary`.
+
+### `simulate <pedidos-por-segundo>`
+
+Simula carga: reparte ese tráfico por las relaciones del modelo y lo compara con lo que aguanta cada parte (capacidad por réplica × réplicas del ambiente). Responde con el uso de cada parte, qué se satura primero y hasta cuánto aguanta. Es un modelo, no una medición: lo que no está cargado (`load.capacity` en el elemento) se supone por tipo y sale marcado como `(supuesto)`.
+
+- `--env <id>`: ambiente del que salen las réplicas (por defecto, el productivo).
+- `--system <id>`: solo el tráfico que entra a ese sistema.
+- `--strict`: sale con `1` si algo se satura con ese tráfico.
+- Con `--json`: `nodes` (carga, capacidad, `utilization`, `state`, `affectedBy`, `backlog`), `limit`, `failureLimit`, `saturated` y `notes` con lo que se supuso.
+
+Usalo cuando pregunten cuánto aguanta una arquitectura o dónde está el cuello de botella, y contá en la respuesta qué capacidades eran supuestos.
 
 ### `diff [ref]`
 

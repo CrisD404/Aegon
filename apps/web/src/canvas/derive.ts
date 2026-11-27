@@ -5,16 +5,21 @@ import {
   childViewOf,
   descendantsOf,
   edgeLabelSize,
+  edgeLabelSizes,
   findTechnology,
   indexOf,
   isExpandedInView,
   isFrameInView,
   isNetworkRelation,
+  mergedStatus,
   NODE_TYPE_LABEL,
   projectedEdges,
+  relationStatusOf,
   representativeInView,
   sizeOf,
+  statusOf,
   visualParentOf as coreVisualParentOf,
+  type EdgeAnchor,
   type EdgeShape,
   type Element,
   type ElementOf,
@@ -22,11 +27,21 @@ import {
   type Level,
   type Model,
   type Relation,
+  type Status,
   type View,
 } from '@aegon/core';
-import { floatingEnds, pointOnEdge, type Rect } from './edges/geometry.ts';
+import { edgeEnds, floatingEnds, pointOnEdge, routedPointAlong, type Rect } from './edges/geometry.ts';
 
-export interface ElementNodeData extends Record<string, unknown> {
+/**
+ * Estado que se dibuja en un nodo (nuevo, se modifica, se da de baja, retirado). `statusMark` dice
+ * si lleva la etiqueta: lo que lo hereda de un marco que está en el mismo lienzo solo toma el color.
+ */
+export interface StatusData {
+  status?: Exclude<Status, 'live'>;
+  statusMark?: boolean;
+}
+
+export interface ElementNodeData extends Record<string, unknown>, StatusData {
   element: Element;
   level: Level;
   /** Hijos C4 (containers de un sistema, componentes de un container). */
@@ -40,22 +55,22 @@ export interface ElementNodeData extends Record<string, unknown> {
   target?: Element;
 }
 
-export interface GroupNodeData extends Record<string, unknown> {
+export interface GroupNodeData extends Record<string, unknown>, StatusData {
   element: ElementOf<'group'>;
   fresh: boolean;
 }
 
-export interface DeploymentNodeData extends Record<string, unknown> {
+export interface DeploymentNodeData extends Record<string, unknown>, StatusData {
   element: ElementOf<'node'>;
   fresh: boolean;
 }
 
-export interface BoundaryNodeData extends Record<string, unknown> {
+export interface BoundaryNodeData extends Record<string, unknown>, StatusData {
   element: Element;
 }
 
 /** Sistema o contenedor abierto en el lugar: un marco con sus hijos adentro. */
-export interface OpenNodeData extends Record<string, unknown> {
+export interface OpenNodeData extends Record<string, unknown>, StatusData {
   element: Element;
   /** Hijos C4 que tiene en el modelo (los muestre o no este lienzo). */
   childCount: number;
@@ -79,12 +94,35 @@ export interface RelationEdgeData extends Record<string, unknown> {
   bidirectional: boolean;
   flow: EdgeFlow | null;
   fresh: boolean;
+  /** Estado de la línea (nueva, se modifica, se da de baja); sin valor, existe y no cambia. */
+  status?: Exclude<Status, 'live'>;
+  /** La línea lleva la etiqueta del estado: está marcada ella (si lo toma de un extremo, solo el color). */
+  statusMark?: boolean;
   /** Despliegue: relación lógica dibujada entre instancias (no hay camino de red explícito). */
   projected?: boolean;
   /** Despliegue: tramo de red (toca un nodo, infraestructura o instancia). */
   network?: boolean;
   /** Dónde va la etiqueta sobre el trazo (0 a 1) si en el medio tapa algo; sin valor, al medio. */
   labelT?: number;
+  /**
+   * Ida y vuelta: dónde va la etiqueta de cada sentido (`[vuelta, ida]`, cada una del lado de la
+   * punta a la que apunta). Sin valor, lo decide la flecha: separadas si entran, o apiladas.
+   */
+  labelTs?: readonly [number, number];
+  /** Relación bajo la que el lienzo guarda el estilo de esta línea; sin valor (implícitas), no se acomoda. */
+  routeKey?: Id;
+  /** Recorrido acomodado a mano: puntos por donde pasa, en coordenadas del lienzo. */
+  points?: readonly { x: number; y: number }[];
+  /** Dónde estaban origen y destino cuando se guardó el recorrido (x, y de cada uno): si se mueven juntos, los puntos los siguen. */
+  placedAt?: readonly [number, number, number, number];
+  /** Punta fija en el origen o en el destino: de qué lado del nodo toca, y a qué altura. */
+  fromAt?: EdgeAnchor;
+  toAt?: EdgeAnchor;
+  /** Relación bajo la que el lienzo guarda dónde va la etiqueta de esta línea (también las implícitas). */
+  labelKey?: Id;
+  /** Etiqueta movida a mano: a qué altura del trazo va (0 a 1). La de la vuelta, en `backLabelAt`. */
+  labelAt?: number;
+  backLabelAt?: number;
 }
 
 export type RelationFlowEdge = Edge<RelationEdgeData, 'relation'>;
@@ -144,6 +182,49 @@ function nodeData(
   return data;
 }
 
+/**
+ * Estado con el que se dibuja un elemento. La etiqueta va donde se declara: lo que hereda de un
+ * marco que está en este lienzo (o del sistema abierto, que es el marco del lienzo) solo se tiñe.
+ */
+export function statusData(model: Model, view: View, id: Id): StatusData {
+  const info = statusOf(model, id);
+  if (info.status === 'live') return {};
+  const shown = info.from === 'ancestor' && !!info.source && (!!view.nodes[info.source] || (view.level !== 'deployment' && view.scope === info.source));
+  return { status: info.status, statusMark: !shown };
+}
+
+/** Estado de una línea que junta relaciones, evaluado entre los extremos que se dibujan. */
+function edgeStatus(model: Model, relations: readonly Relation[], ends?: readonly Id[]): { status?: Exclude<Status, 'live'>; statusMark?: boolean } {
+  const infos = relations.map((r) => relationStatusOf(model, r, ends ?? [r.from, r.to]));
+  const status = mergedStatus(infos.map((i) => i.status));
+  if (status === 'live') return {};
+  return { status, statusMark: infos.some((i) => i.from === 'own') };
+}
+
+/** Dónde quedó la etiqueta de una línea si se la movió a mano, guardado bajo la relación `key`. */
+function labelData(view: View, key: Id): Pick<RelationEdgeData, 'labelKey' | 'labelAt' | 'backLabelAt'> {
+  const style = view.edges?.[key];
+  return {
+    labelKey: key,
+    ...(style?.labelAt !== undefined ? { labelAt: style.labelAt } : {}),
+    ...(style?.backLabelAt !== undefined ? { backLabelAt: style.backLabelAt } : {}),
+  };
+}
+
+/** Lo acomodado a mano de una línea del lienzo (recorrido, puntas fijas y etiqueta), guardado bajo la relación `key`. */
+function routeData(view: View, key: Id, from: Id, to: Id): Pick<RelationEdgeData, 'routeKey' | 'points' | 'placedAt' | 'fromAt' | 'toAt' | 'labelKey' | 'labelAt' | 'backLabelAt'> {
+  const style = view.edges?.[key];
+  const a = view.nodes[from];
+  const b = view.nodes[to];
+  return {
+    routeKey: key,
+    ...labelData(view, key),
+    ...(style?.from ? { fromAt: style.from } : {}),
+    ...(style?.to ? { toAt: style.to } : {}),
+    ...(style?.points?.length && a && b ? { points: style.points, placedAt: [a.x, a.y, b.x, b.y] as const } : {}),
+  };
+}
+
 /** Nodos de ReactFlow para un lienzo. Las posiciones del YAML son absolutas; ReactFlow usa relativas al grupo. */
 export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): AegonNode[] {
   const idx = indexOf(model);
@@ -168,7 +249,7 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
         height: size.h,
         ...(parentId ? { parentId } : {}),
         zIndex: -10 + frameDepth(model, view, id),
-        data: nodeData(el, { fresh: fresh.has(id) }) as GroupNodeData,
+        data: nodeData(el, { fresh: fresh.has(id), ...statusData(model, view, id) }) as GroupNodeData,
       });
       continue;
     }
@@ -181,7 +262,7 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
         height: size.h,
         ...(parentId ? { parentId } : {}),
         zIndex: -10 + frameDepth(model, view, id),
-        data: nodeData(el, { fresh: fresh.has(id) }) as DeploymentNodeData,
+        data: nodeData(el, { fresh: fresh.has(id), ...statusData(model, view, id) }) as DeploymentNodeData,
       });
       continue;
     }
@@ -194,7 +275,7 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
         height: size.h,
         ...(parentId ? { parentId } : {}),
         zIndex: -10 + frameDepth(model, view, id),
-        data: nodeData(el, { childCount: c4ChildrenOf(model, id).length, fresh: fresh.has(id) }) as OpenNodeData,
+        data: nodeData(el, { childCount: c4ChildrenOf(model, id).length, fresh: fresh.has(id), ...statusData(model, view, id) }) as OpenNodeData,
       });
       continue;
     }
@@ -222,6 +303,7 @@ export function deriveNodes(model: Model, view: View, fresh: ReadonlySet<Id>): A
         canDrill: !!drillLevel,
         hasChildView: !!childViewOf(model, id),
         fresh: fresh.has(id),
+        ...statusData(model, view, id),
         ...(target ? { target } : {}),
       }) as ElementNodeData,
     });
@@ -321,7 +403,7 @@ export function deriveBoundary(
     focusable: false,
     connectable: false,
     zIndex: -20,
-    data: { element: scope },
+    data: { element: scope, ...statusData(model, view, scope.id) },
   };
 }
 
@@ -385,6 +467,8 @@ export function deriveEdges(
           bidirectional,
           flow: flowOf(a, b, bidirectional, selectedNodes),
           fresh: fresh.has(rel.id),
+          ...edgeStatus(model, [rel]),
+          ...routeData(view, rel.id, a, b),
           ...(view.level === 'deployment' && isNetworkRelation(model, rel)
             ? { network: true }
             : {}),
@@ -410,6 +494,7 @@ export function deriveEdges(
   for (const [key, entry] of implied) {
     if (directPairs.has(key)) continue;
     const id = `${IMPLIED_PREFIX}${entry.from}>${entry.to}`;
+    const relations = entry.relations.sort((x, y) => x.id.localeCompare(y.id));
     out.push({
       id,
       type: 'relation',
@@ -418,12 +503,14 @@ export function deriveEdges(
       selected: selectedEdges.has(id),
       deletable: false,
       data: {
-        relations: entry.relations.sort((x, y) => x.id.localeCompare(y.id)),
+        relations,
         implied: true,
         shape: 'curved',
         bidirectional: entry.both,
         flow: flowOf(entry.from, entry.to, entry.both, selectedNodes),
         fresh: false,
+        // Una implícita no se acomoda, pero su etiqueta sí se mueve: se guarda bajo su primera relación.
+        ...labelData(view, relations[0]!.id),
       },
     });
   }
@@ -454,6 +541,8 @@ export function deriveEdges(
           bidirectional: p.bidirectional,
           flow: flowOf(p.from, p.to, p.bidirectional, selectedNodes),
           fresh: false,
+          ...edgeStatus(model, p.relations, [p.from, p.to]),
+          ...routeData(view, p.relations[0]!.id, p.from, p.to),
         },
       });
     }
@@ -549,6 +638,8 @@ export function frameTitleRect(el: Element, frame: Rect): Rect {
 
 /** Puntos del trazo donde se prueba la etiqueta: primero el medio, después hacia los extremos. */
 const LABEL_SPOTS = [0.5, 0.42, 0.58, 0.34, 0.66, 0.27, 0.73, 0.2, 0.8];
+/** Ida y vuelta: dónde se prueba la etiqueta de la ida (del lado del destino); la de la vuelta, espejada. */
+const WAY_SPOTS = [0.7, 0.64, 0.76, 0.6, 0.8];
 /** Aire alrededor de la etiqueta al comparar con nodos y con otras etiquetas. */
 const LABEL_AIR = 6;
 const CELL = 256;
@@ -600,37 +691,81 @@ function placeEdgeLabels(model: Model, view: View, edges: RelationFlowEdge[]): v
     return area;
   };
 
+  // Las etiquetas movidas a mano quedan donde se las dejó, y las demás las esquivan.
+  for (const edge of edges) {
+    const data = edge.data;
+    const s = rects.get(edge.source);
+    const t = rects.get(edge.target);
+    if (!data || !s || !t || (data.labelAt === undefined && data.backLabelAt === undefined)) continue;
+    const ends = edgeEnds(s, t, { from: data.fromAt, to: data.toAt, points: data.points });
+    const at = (u: number) =>
+      data.points?.length
+        ? routedPointAlong(data.shape, [{ x: ends.sourceX, y: ends.sourceY }, ...data.points, { x: ends.targetX, y: ends.targetY }], u)
+        : pointOnEdge(data.shape, ends, u);
+    const place = (box: { width: number; height: number } | null, u: number | undefined) => {
+      const p = box && u !== undefined ? at(u) : null;
+      if (box && p) add({ x: p.x - box.width / 2 - LABEL_AIR, y: p.y - box.height / 2 - LABEL_AIR, w: box.width + LABEL_AIR * 2, h: box.height + LABEL_AIR * 2 });
+    };
+    const sides = edgeLabelSizes(data);
+    // Con la de la vuelta ubicada van separadas; si no, es una sola etiqueta (o las dos apiladas).
+    if (data.backLabelAt !== undefined && sides.main && sides.back) {
+      place(sides.main, data.labelAt ?? WAY_SPOTS[0]);
+      place(sides.back, data.backLabelAt);
+    } else {
+      place(edgeLabelSize(data), data.labelAt ?? data.backLabelAt);
+    }
+  }
+
   const candidates = edges
     .map((edge) => {
       const s = rects.get(edge.source);
       const t = rects.get(edge.target);
       const size = edge.data ? edgeLabelSize(edge.data) : null;
-      if (!s || !t || !size || edge.data!.shape === 'step') return null;
+      // Las acomodadas a mano llevan la etiqueta sobre su propio trazo: no se reubican.
+      if (!s || !t || !size || edge.data!.shape === 'step' || edge.data!.points?.length || edge.data!.fromAt || edge.data!.toAt) return null;
+      if (edge.data!.labelAt !== undefined || edge.data!.backLabelAt !== undefined) return null;
       const ends = floatingEnds(s, t);
       return {
         edge,
         ends,
         size,
+        sides: edgeLabelSizes(edge.data!),
         length: Math.hypot(ends.targetX - ends.sourceX, ends.targetY - ends.sourceY),
       };
     })
     .filter((c) => c !== null)
     .sort((a, b) => a.length - b.length);
 
-  for (const { edge, ends, size } of candidates) {
-    let best: { t: number; rect: Rect; area: number } | null = null;
-    for (const t of LABEL_SPOTS) {
-      const p = pointOnEdge(edge.data!.shape, ends, t)!;
-      const rect = {
-        x: p.x - size.width / 2 - LABEL_AIR,
-        y: p.y - size.height / 2 - LABEL_AIR,
-        w: size.width + LABEL_AIR * 2,
-        h: size.height + LABEL_AIR * 2,
-      };
-      const area = covered(rect);
-      if (!best || area < best.area) best = { t, rect, area };
-      if (area === 0) break;
+  for (const { edge, ends, size, sides } of candidates) {
+    const spot = (box: { width: number; height: number }, spots: readonly number[]) => {
+      let best: { t: number; rect: Rect; area: number } | null = null;
+      for (const t of spots) {
+        const p = pointOnEdge(edge.data!.shape, ends, t)!;
+        const rect = {
+          x: p.x - box.width / 2 - LABEL_AIR,
+          y: p.y - box.height / 2 - LABEL_AIR,
+          w: box.width + LABEL_AIR * 2,
+          h: box.height + LABEL_AIR * 2,
+        };
+        const area = covered(rect);
+        if (!best || area < best.area) best = { t, rect, area };
+        if (area === 0) break;
+      }
+      return best;
+    };
+    // Ida y vuelta: cada etiqueta cerca de la punta a la que apunta, si entran sin pisarse.
+    if (sides.main && sides.back) {
+      const main = spot(sides.main, WAY_SPOTS);
+      const back = spot(sides.back, WAY_SPOTS.map((t) => 1 - t));
+      const clash = main && back && main.rect.x < back.rect.x + back.rect.w && back.rect.x < main.rect.x + main.rect.w && main.rect.y < back.rect.y + back.rect.h && back.rect.y < main.rect.y + main.rect.h;
+      if (main && back && !clash) {
+        edge.data!.labelTs = [back.t, main.t];
+        add(main.rect);
+        add(back.rect);
+        continue;
+      }
     }
+    const best = spot(size, LABEL_SPOTS);
     if (!best) continue;
     if (best.t !== 0.5) edge.data!.labelT = best.t;
     add(best.rect);

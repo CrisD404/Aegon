@@ -16,7 +16,23 @@ import {
 import { useWorkspace } from '../store/workspace.ts';
 import { money, parseAmount } from '../lib/money.ts';
 import { openFinOpsSettings } from '../lib/flows.tsx';
-import { Button, IconButton, SectionTitle, TextInput, cn } from '../ui/primitives.tsx';
+import {
+  Button,
+  IconButton,
+  Section,
+  SectionTitle,
+  TextInput,
+  cn,
+  plural,
+  summarize,
+} from '../ui/primitives.tsx';
+
+/**
+ * Campo "callado": vacío no dibuja su caja (queda el lugar, sin pedir nada); aparece al pasar el
+ * mouse o al enfocarlo. Se activa con `data-empty`.
+ */
+const QUIET =
+  'data-[empty=true]:not-focus:border-transparent! data-[empty=true]:not-focus:bg-transparent! data-[empty=true]:not-focus:enabled:hover:border-line! data-[empty=true]:not-focus:enabled:hover:bg-raised!';
 
 /** Campo numérico con texto libre mientras se escribe (acepta `1.450,50`); confirma valores válidos. */
 export function AmountInput({
@@ -27,6 +43,8 @@ export function AmountInput({
   className,
   integer,
   disabled,
+  quiet,
+  label,
   testId,
 }: {
   value: number | undefined;
@@ -36,6 +54,10 @@ export function AmountInput({
   className?: string;
   integer?: boolean;
   disabled?: boolean;
+  /** Sin valor no dibuja la caja (ver `QUIET`). */
+  quiet?: boolean;
+  /** Nombre accesible, para campos sin etiqueta propia (celdas de una grilla). */
+  label?: string;
   testId?: string;
 }) {
   const [text, setText] = useState(value === undefined ? '' : String(value).replace('.', ','));
@@ -63,7 +85,13 @@ export function AmountInput({
           if (!e.target.value.trim()) onChange(null);
           else if (n !== null) onChange(integer ? Math.max(1, Math.round(n)) : n);
         }}
-        className={cn('h-7 text-right font-mono text-[12px] tabular-nums', prefix && 'pl-6')}
+        className={cn(
+          'h-7 text-right font-mono text-[12px] tabular-nums',
+          prefix && 'pl-6',
+          quiet && QUIET,
+        )}
+        data-empty={quiet ? text === '' : undefined}
+        aria-label={label}
         data-testid={testId}
       />
     </div>
@@ -79,7 +107,8 @@ function cleanFinOps(finops: FinOps): FinOps | null {
 
 /**
  * Sección "Costos y ambientes" del inspector: en qué ambientes está desplegado el elemento, su
- * costo mensual por ambiente (con réplicas y SKU) y sus etiquetas FinOps.
+ * costo mensual por ambiente (con réplicas y SKU) y sus etiquetas FinOps. Cerrada muestra el
+ * total; se abre sola si el elemento tiene costos, etiquetas o ambientes propios.
  */
 export function FinOpsFields({
   el,
@@ -96,15 +125,16 @@ export function FinOpsFields({
 
   if (!environments.length) {
     return (
-      <div className="flex flex-col gap-2" data-testid="finops-fields">
-        <SectionTitle>Costos y ambientes</SectionTitle>
-        <div className="rounded-md border border-dashed border-line px-3 py-3 text-[12px] leading-relaxed text-fg-subtle">
-          Definí los ambientes del workspace (desarrollo, QA, producción…) para cargar dónde corre
-          cada elemento y cuánto cuesta.
-          <Button size="sm" className="mt-2" onClick={() => void openFinOpsSettings()}>
-            <Settings2 size={13} /> Configurar ambientes
-          </Button>
-        </div>
+      <div data-testid="finops-fields">
+        <Section title="Costos y ambientes">
+          <div className="rounded-md border border-dashed border-line px-3 py-3 text-[12px] leading-relaxed text-fg-subtle">
+            Definí los ambientes del workspace (desarrollo, QA, producción…) para cargar dónde corre
+            cada elemento y cuánto cuesta.
+            <Button size="sm" className="mt-2" onClick={() => void openFinOpsSettings()}>
+              <Settings2 size={13} /> Configurar ambientes
+            </Button>
+          </div>
+        </Section>
       </div>
     );
   }
@@ -143,9 +173,24 @@ export function FinOpsFields({
     setFinOps({ ...el.finops, tags: next }, 'finops.tags');
   const parent = el.parent ? model.elements[el.parent] : undefined;
 
+  const costCount = Object.keys(costs).length;
+  const tagCount = Object.keys(tags).length;
+  const deployedCount = environments.filter((e) => deployedIn(el, e.id)).length;
+  const summary = summarize(
+    costCount ? `${money(own, currency)}/mes` : undefined,
+    inherited > 0
+      ? `${money(rollup?.total ?? 0, currency)}${costCount ? '' : '/mes'} con lo que contiene`
+      : undefined,
+    el.environments ? `${deployedCount} de ${plural(environments.length, 'ambiente')}` : undefined,
+    tagCount ? plural(tagCount, 'etiqueta') : undefined,
+  );
+
   return (
-    <div className="flex flex-col gap-2" data-testid="finops-fields">
-      <SectionTitle
+    <div data-testid="finops-fields">
+      <Section
+        title="Costos y ambientes"
+        summary={summary}
+        filled={Boolean(costCount || tagCount || el.environments)}
         action={
           <IconButton
             size="sm"
@@ -156,146 +201,157 @@ export function FinOpsFields({
           </IconButton>
         }
       >
-        Costos y ambientes
-      </SectionTitle>
-      <div className="grid grid-cols-[minmax(0,1fr)_84px_44px_minmax(0,1fr)] items-center gap-x-1.5 gap-y-1 text-[11px]">
-        <span className="text-fg-subtle">Desplegado en</span>
-        <span className="text-right text-fg-subtle">Mensual</span>
-        <span className="text-right text-fg-subtle" title="Réplicas o instancias">
-          Rép.
-        </span>
-        <span className="text-fg-subtle">SKU / tamaño</span>
-        {environments.map((env) => {
-          const on = deployedIn(el, env.id);
-          const cost = costs[env.id];
-          return (
-            <Fragment key={env.id}>
-              <button
-                type="button"
-                onClick={() => toggleEnv(env.id)}
-                aria-pressed={on}
-                title={
-                  on
-                    ? `Desplegado en ${env.name}: click para quitarlo`
-                    : `No está en ${env.name}: click para agregarlo`
-                }
-                className={cn(
-                  'flex h-7 min-w-0 items-center gap-1.5 rounded-sm border px-2 text-left text-[12px] transition-colors',
-                  on
-                    ? 'border-line bg-raised text-fg'
-                    : 'border-dashed border-line text-fg-subtle line-through',
-                )}
-                data-testid={`env-toggle-${env.id}`}
+        <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_84px_44px_minmax(0,1fr)] items-center gap-x-1.5 gap-y-1 text-[11px]">
+            <span className="text-fg-subtle">Desplegado en</span>
+            <span className="text-right text-fg-subtle">Mensual</span>
+            <span className="text-right text-fg-subtle" title="Réplicas o instancias">
+              Rép.
+            </span>
+            <span className="text-fg-subtle">SKU / tamaño</span>
+            {environments.map((env) => {
+              const on = deployedIn(el, env.id);
+              const cost = costs[env.id];
+              return (
+                <Fragment key={env.id}>
+                  <button
+                    type="button"
+                    onClick={() => toggleEnv(env.id)}
+                    aria-pressed={on}
+                    title={
+                      on
+                        ? `Desplegado en ${env.name}: click para quitarlo`
+                        : `No está en ${env.name}: click para agregarlo`
+                    }
+                    className={cn(
+                      'flex h-7 min-w-0 items-center gap-1.5 rounded-sm border px-2 text-left text-[12px] transition-colors',
+                      on
+                        ? 'border-line bg-raised text-fg'
+                        : 'border-dashed border-line text-fg-subtle line-through',
+                    )}
+                    data-testid={`env-toggle-${env.id}`}
+                  >
+                    <span
+                      className={cn(
+                        'h-1.5 w-1.5 shrink-0 rounded-full',
+                        on ? 'bg-ok' : 'bg-line-strong',
+                      )}
+                    />
+                    <span className="truncate">{env.name.length <= 9 ? env.name : env.id}</span>
+                  </button>
+                  <AmountInput
+                    value={cost?.monthly}
+                    disabled={!on}
+                    quiet
+                    label={`Costo mensual en ${env.name}`}
+                    placeholder={on ? '—' : ''}
+                    prefix={currencySymbol(currency)}
+                    onChange={(v) =>
+                      v === null
+                        ? cost?.sku || cost?.replicas
+                          ? setCost(env.id, { monthly: 0 })
+                          : setCost(env.id, null)
+                        : setCost(env.id, { monthly: v })
+                    }
+                    testId={`cost-${env.id}`}
+                  />
+                  <AmountInput
+                    value={cost?.replicas}
+                    disabled={!on || !cost}
+                    integer
+                    quiet
+                    label={`Réplicas en ${env.name}`}
+                    onChange={(v) => setCost(env.id, { replicas: v ?? undefined })}
+                  />
+                  <TextInput
+                    value={cost?.sku ?? ''}
+                    disabled={!on || !cost}
+                    onChange={(e) => setCost(env.id, { sku: e.target.value || undefined })}
+                    placeholder={cost ? 'SKU' : ''}
+                    className={cn('h-7 min-w-0 font-mono text-[11px]', QUIET)}
+                    data-empty={!cost?.sku}
+                    aria-label={`SKU o tamaño en ${env.name}`}
+                  />
+                </Fragment>
+              );
+            })}
+          </div>
+          <div className="flex items-baseline justify-between rounded-md bg-raised/70 px-2.5 py-1.5 text-[12px]">
+            <span className="text-fg-subtle">Total mensual{inherited > 0 ? ' propio' : ''}</span>
+            <span
+              className="font-mono font-semibold text-fg tabular-nums"
+              data-testid="finops-total"
+            >
+              {money(own, currency)}
+            </span>
+          </div>
+          {inherited > 0 ? (
+            <div className="flex items-baseline justify-between px-2.5 text-[11.5px] text-fg-subtle">
+              <span>Con lo que contiene</span>
+              <span className="font-mono tabular-nums">{money(rollup?.total ?? 0, currency)}</span>
+            </div>
+          ) : null}
+
+          <SectionTitle
+            action={
+              <IconButton
+                size="sm"
+                label="Agregar etiqueta FinOps"
+                onClick={() => setTags({ ...tags, [nextKey]: '' })}
               >
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 shrink-0 rounded-full',
-                    on ? 'bg-ok' : 'bg-line-strong',
-                  )}
-                />
-                <span className="truncate">{env.name.length <= 9 ? env.name : env.id}</span>
-              </button>
-              <AmountInput
-                value={cost?.monthly}
-                disabled={!on}
-                prefix={currencySymbol(currency)}
-                onChange={(v) =>
-                  v === null
-                    ? cost?.sku || cost?.replicas
-                      ? setCost(env.id, { monthly: 0 })
-                      : setCost(env.id, null)
-                    : setCost(env.id, { monthly: v })
-                }
-                testId={`cost-${env.id}`}
-              />
-              <AmountInput
-                value={cost?.replicas}
-                disabled={!on || !cost}
-                integer
-                onChange={(v) => setCost(env.id, { replicas: v ?? undefined })}
+                <Plus size={13} />
+              </IconButton>
+            }
+          >
+            Etiquetas FinOps
+          </SectionTitle>
+          {Object.entries(tags).map(([k, v], i, all) => (
+            <div key={i} className="flex items-center gap-1">
+              <TextInput
+                defaultValue={k}
+                list="finops-tag-keys"
+                onBlur={(e) => {
+                  const key = e.target.value.trim();
+                  if (key && key !== k)
+                    setTags(
+                      Object.fromEntries(all.map(([kk, vv]) => (kk === k ? [key, vv] : [kk, vv]))),
+                    );
+                }}
+                className="h-7 w-[42%]! font-mono text-[11.5px]"
               />
               <TextInput
-                value={cost?.sku ?? ''}
-                disabled={!on || !cost}
-                onChange={(e) => setCost(env.id, { sku: e.target.value || undefined })}
-                placeholder={cost ? 'SKU' : ''}
-                className="h-7 min-w-0 font-mono text-[11px]"
+                value={v}
+                onChange={(e) => setTags({ ...tags, [k]: e.target.value })}
+                placeholder={parent ? (tagOf(model, parent, k) ?? '') : ''}
+                className="h-7 flex-1 text-[12px]"
               />
-            </Fragment>
-          );
-        })}
-      </div>
-      <div className="flex items-baseline justify-between rounded-md bg-raised/70 px-2.5 py-1.5 text-[12px]">
-        <span className="text-fg-subtle">Total mensual{inherited > 0 ? ' propio' : ''}</span>
-        <span className="font-mono font-semibold text-fg tabular-nums" data-testid="finops-total">
-          {money(own, currency)}
-        </span>
-      </div>
-      {inherited > 0 ? (
-        <div className="flex items-baseline justify-between px-2.5 text-[11.5px] text-fg-subtle">
-          <span>Con lo que contiene</span>
-          <span className="font-mono tabular-nums">{money(rollup?.total ?? 0, currency)}</span>
+              <IconButton
+                size="sm"
+                label="Quitar etiqueta"
+                onClick={() => setTags(Object.fromEntries(all.filter(([kk]) => kk !== k)))}
+              >
+                <X size={12} />
+              </IconButton>
+            </div>
+          ))}
+          {!Object.keys(tags).length ? (
+            <p className="m-0 text-[11.5px] leading-relaxed text-fg-subtle">
+              {parent && tagKeys.some((k) => tagOf(model, parent, k))
+                ? `Hereda de ${parent.name}: ${tagKeys
+                    .map((k) => [k, tagOf(model, parent, k)] as const)
+                    .filter(([, v]) => v)
+                    .map(([k, v]) => `${k} = ${v}`)
+                    .join(', ')}.`
+                : 'Centro de costos, proyecto o unidad de negocio para repartir costos.'}
+            </p>
+          ) : null}
+          <datalist id="finops-tag-keys">
+            {tagKeys.map((k) => (
+              <option key={k} value={k} />
+            ))}
+          </datalist>
         </div>
-      ) : null}
-
-      <SectionTitle
-        action={
-          <IconButton
-            size="sm"
-            label="Agregar etiqueta FinOps"
-            onClick={() => setTags({ ...tags, [nextKey]: '' })}
-          >
-            <Plus size={13} />
-          </IconButton>
-        }
-      >
-        Etiquetas FinOps
-      </SectionTitle>
-      {Object.entries(tags).map(([k, v], i, all) => (
-        <div key={i} className="flex items-center gap-1">
-          <TextInput
-            defaultValue={k}
-            list="finops-tag-keys"
-            onBlur={(e) => {
-              const key = e.target.value.trim();
-              if (key && key !== k)
-                setTags(
-                  Object.fromEntries(all.map(([kk, vv]) => (kk === k ? [key, vv] : [kk, vv]))),
-                );
-            }}
-            className="h-7 w-[42%] font-mono text-[11.5px]"
-          />
-          <TextInput
-            value={v}
-            onChange={(e) => setTags({ ...tags, [k]: e.target.value })}
-            placeholder={parent ? (tagOf(model, parent, k) ?? '') : ''}
-            className="h-7 flex-1 text-[12px]"
-          />
-          <IconButton
-            size="sm"
-            label="Quitar etiqueta"
-            onClick={() => setTags(Object.fromEntries(all.filter(([kk]) => kk !== k)))}
-          >
-            <X size={12} />
-          </IconButton>
-        </div>
-      ))}
-      {!Object.keys(tags).length ? (
-        <p className="m-0 text-[11.5px] leading-relaxed text-fg-subtle">
-          {parent && tagKeys.some((k) => tagOf(model, parent, k))
-            ? `Hereda de ${parent.name}: ${tagKeys
-                .map((k) => [k, tagOf(model, parent, k)] as const)
-                .filter(([, v]) => v)
-                .map(([k, v]) => `${k} = ${v}`)
-                .join(', ')}.`
-            : 'Centro de costos, proyecto o unidad de negocio para repartir costos.'}
-        </p>
-      ) : null}
-      <datalist id="finops-tag-keys">
-        {tagKeys.map((k) => (
-          <option key={k} value={k} />
-        ))}
-      </datalist>
+      </Section>
     </div>
   );
 }

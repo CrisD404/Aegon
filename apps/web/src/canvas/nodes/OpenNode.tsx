@@ -4,7 +4,7 @@ import { ChevronDown, SquareArrowOutUpRight } from 'lucide-react';
 import { TechIcon } from '@aegon/icons';
 import { drillInto, toggleExpand } from '../../lib/actions.ts';
 import { openCaption, type OpenFlowNode } from '../derive.ts';
-import { CostBadge, elementIcon } from './ElementNode.tsx';
+import { CostBadge, LoadBadge, StatusMark, elementIcon } from './ElementNode.tsx';
 
 const HANDLES = [
   { id: 't', position: Position.Top },
@@ -26,11 +26,12 @@ function OpenNodeImpl({ data }: NodeProps<OpenFlowNode>) {
       className="c4-open"
       data-kind={el.kind}
       data-external={el.scope === 'external' || undefined}
-      data-status={el.status}
+      data-status={data.status}
       data-new={data.fresh || undefined}
       data-frame-id={el.id}
       data-testid={`open-${el.id}`}
     >
+      <StatusMark status={data.status} show={data.statusMark} />
       <div className="c4-open__edge" />
       <div className="c4-open__head">
         <button
@@ -51,6 +52,7 @@ function OpenNodeImpl({ data }: NodeProps<OpenFlowNode>) {
         <span className="c4-open__name">{el.name}</span>
         <small>{openCaption(el, data.childCount)}</small>
         <CostBadge id={el.id} />
+        <LoadBadge id={el.id} />
         <button
           type="button"
           className="c4-open__btn c4-open__detail nodrag nopan"

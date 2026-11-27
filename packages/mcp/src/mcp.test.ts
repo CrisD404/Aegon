@@ -58,7 +58,7 @@ describe('servidor MCP', () => {
         'add_element', 'analyze', 'connect', 'create_child_view', 'create_view', 'export', 'get_element', 'get_relation',
         'get_view', 'get_workspace', 'layout_view', 'list_elements', 'list_relations', 'list_views', 'place',
         'remove_element', 'remove_relation', 'remove_view', 'search_catalog', 'set_edge_style', 'unplace', 'update_element',
-        'update_relation', 'update_view', 'update_workspace', 'validate',
+        'update_relation', 'update_view', 'update_workspace', 'validate', 'simulate',
         'list_flows', 'get_flow', 'create_flow', 'add_flow_step', 'update_flow', 'delete_flow',
         'list_comments', 'add_comment', 'reply_comment', 'resolve_comment', 'delete_comment',
       ].sort(),
@@ -539,6 +539,13 @@ describe('fixtures', () => {
     expect((await demo.call('validate')).json).toMatchObject({ ok: true, errors: 0, warnings: 0 });
     expect((await demo.call('get_workspace')).json.counts).toMatchObject({ elements: 20, relations: 18, views: 3 });
     expect((await demo.call('analyze')).json.summary).toMatchObject({ errors: 0, orphans: 0, cycles: 0 });
+    // Simular: este workspace no tiene ambientes ni despliegue, así que hay una réplica de cada cosa
+    // y lo primero que falla en línea es un servicio (300 por segundo, supuesto por tipo).
+    const load = (await demo.call('simulate', { rps: 1500, system: 'Home Banking' })).json;
+    expect(load).toMatchObject({ ok: false, environment: null, system: 'home-banking', failureLimit: { rps: 300, bottleneck: 'cuentas-api' } });
+    expect(load.nodes['cuentas-api']).toMatchObject({ replicas: 1, perReplica: 300, assumed: true, state: 'saturated' });
+    expect(load.nodes['api-gateway'].affectedBy).toContain('cuentas-api');
+    expect((await demo.call('simulate', { rps: 10, environment: 'staging' })).text).toContain('[not-found]');
     await demo.close();
 
     const root = tempCopy('demo');

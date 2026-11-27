@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Activity, CircleDollarSign, FolderOpen, GitCompareArrows, Loader2, MessageSquare, SlidersHorizontal, X, type LucideIcon } from 'lucide-react';
+import { Activity, CircleDollarSign, FolderOpen, Gauge, GitCompareArrows, Loader2, MessageSquare, SlidersHorizontal, X, type LucideIcon } from 'lucide-react';
 import { Canvas } from './canvas/Canvas.tsx';
 import { Sidebar } from './panels/Sidebar.tsx';
 import { Inspector } from './panels/Inspector.tsx';
@@ -9,6 +9,7 @@ import { CommandPalette } from './panels/CommandPalette.tsx';
 import { CostsPanel } from './panels/CostsPanel.tsx';
 import { CommentsPanel } from './panels/CommentsPanel.tsx';
 import { HealthPanel, healthCount, useHealth } from './panels/HealthPanel.tsx';
+import { LoadPanel } from './panels/LoadPanel.tsx';
 import { ConflictDialog, GitHubDialog } from './panels/SyncDialogs.tsx';
 import { DialogHost } from './panels/Dialogs.tsx';
 import { useTemplates } from './store/templates.ts';
@@ -140,11 +141,13 @@ function RightPanel() {
   const changes = useChangeCount();
   const openComments = useWorkspace((s) => Object.values(s.model.comments ?? {}).filter((c) => !c.resolved).length);
   const health = healthCount(useHealth());
-  // Cada panel es un ícono; el activo muestra su nombre. Así entran los que se sumen sin apretarse.
+  const simulate = useUi((s) => s.simulate);
+  // Cada panel es un ícono; el activo muestra su nombre. El del modo es uno solo: Costos, o Carga
+  // mientras se simula, así las pestañas no crecen con cada modo que se sume.
   const tabs: [RightTab, string, LucideIcon][] = [
     ['inspector', 'Inspector', SlidersHorizontal],
     ['changes', 'Cambios', GitCompareArrows],
-    ['costs', 'Costos', CircleDollarSign],
+    simulate || tab === 'load' ? ['load', 'Carga', Gauge] : ['costs', 'Costos', CircleDollarSign],
     ['comments', 'Comentarios', MessageSquare],
     ['health', 'Salud', Activity],
   ];
@@ -181,7 +184,7 @@ function RightPanel() {
         })}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === 'inspector' ? <Inspector /> : tab === 'costs' ? <CostsPanel /> : tab === 'comments' ? <CommentsPanel /> : tab === 'health' ? <HealthPanel /> : <ChangesPanel />}
+        {tab === 'inspector' ? <Inspector /> : tab === 'costs' ? <CostsPanel /> : tab === 'comments' ? <CommentsPanel /> : tab === 'health' ? <HealthPanel /> : tab === 'load' ? <LoadPanel /> : <ChangesPanel />}
       </div>
     </div>
   );

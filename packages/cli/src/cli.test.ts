@@ -171,12 +171,47 @@ describe('aegon connect', () => {
     expect(same.out).toContain('Sin cambios');
   });
 
+  it('cada sentido de una relación bidireccional lleva lo suyo', async () => {
+    const dir = tempWorkspace(sampleModel());
+    const r = await cli(dir, 'connect', 'web', 'core', '-l', 'Autentica', '-p', 'ldap:389', '--back-label', 'Replica perfiles', '--back-protocols', 'SMB:445');
+    expect(r.code).toBe(0);
+    expect((await modelOnDisk(dir)).relations['web--core']).toMatchObject({
+      label: 'Autentica',
+      protocols: [{ id: 'ldap', ports: [389] }],
+      direction: 'bidirectional',
+      back: { label: 'Replica perfiles', protocols: [{ id: 'smb', ports: [445] }] },
+    });
+
+    // Conectar al revés una que ya existe: lo indicado es su vuelta, y la ida no se toca.
+    const before = sampleModel().relations['web--api']!;
+    const reverse = await cli(dir, 'connect', 'api', 'web', '-l', 'Avisa', '-p', 'amqp:5672');
+    expect(reverse.out).toContain('bidireccional');
+    const rel = (await modelOnDisk(dir)).relations['web--api']!;
+    expect(rel.direction).toBe('bidirectional');
+    expect(rel.back).toEqual({ label: 'Avisa', protocols: [{ id: 'amqp', ports: [5672] }] });
+    expect({ label: rel.label, protocols: rel.protocols }).toEqual({ label: before.label, protocols: before.protocols });
+  });
+
   it('sugiere protocolos según el destino y avisa los desconocidos', async () => {
     const dir = tempWorkspace(sampleModel());
     const r = await cli(dir, 'connect', 'web', 'db');
     expect(r.out).toMatch(/Sugeridos para "Banking DB": jdbc/);
     const unknown = await cli(dir, 'connect', 'customer', 'api', '-p', 'telepatia');
     expect(unknown.err).toContain('Protocolo "telepatia" fuera del catálogo');
+  });
+
+  it('cada protocolo puede llevar sus puertos y se guardan juntos', async () => {
+    const dir = tempWorkspace(sampleModel());
+    const r = await cli(dir, 'connect', 'web', 'core', '-l', 'Autentica y sincroniza', '-p', 'DNS:53,ntp:123,ldap:389/636,https');
+    expect(r.code).toBe(0);
+    const model = await modelOnDisk(dir);
+    expect(model.relations['web--core']!.protocols).toEqual([{ id: 'dns', ports: [53] }, { id: 'ntp', ports: [123] }, { id: 'ldap', ports: [389, 636] }, 'https']);
+    expect(model.relations['web--core']!.ports).toBeUndefined();
+    // Un puerto fuera de rango se rechaza y no escribe nada.
+    const bad = await cli(dir, 'connect', 'customer', 'api', '-p', 'https:70000');
+    expect(bad.code).not.toBe(0);
+    expect(bad.err).toContain('Puertos inválidos');
+    expect((await modelOnDisk(dir)).relations['customer--api']).toBeUndefined();
   });
 
   it('no permite relaciones con grupos ni elementos inexistentes', async () => {
@@ -351,6 +386,34 @@ describe('aegon flows y flow', () => {
     expect((await cli(dir, 'export', 'flow', 'transferencia', 'svg')).err).toContain('Formato de flujo desconocido "svg"');
     expect((await cli(dir, 'export', 'flow', 'transferencia')).code).toBe(2);
     expect((await cli(dir, 'export', 'flow', 'nada', 'text')).code).toBe(1);
+  });
+});
+
+describe('aegon simulate', () => {
+  it('dice cuánto aguanta y qué satura primero, con las réplicas del ambiente productivo', async () => {
+    const dir = tempWorkspace(demoModel());
+    const calm = await cli(dir, 'simulate', '200', '--system', 'Home Banking');
+    expect(calm.code).toBe(0);
+    expect(calm.out).toContain('Simulación · 200 pedidos por segundo · Producción · Home Banking');
+    expect(calm.out).toContain('Aguanta hasta 300 pedidos por segundo: primero se atrasa Notificaciones; falla desde 1.000 (Banking DB)');
+    expect(calm.out).toContain('Pagos API (pagos-api)  11%  200 de 1.800  6 × 300 (supuesto)');
+
+    const hot = await cli(dir, 'simulate', '1500', '--system', 'home-banking', '--json');
+    const result = JSON.parse(hot.out);
+    expect(result).toMatchObject({ ok: false, rps: 1500, environment: 'prod', system: 'home-banking', failureLimit: { rps: 1000, bottleneck: 'banking-db' } });
+    expect(result.saturated).toContain('banking-db');
+    expect(result.nodes['pagos-api'].affectedBy).toEqual(['banking-db']);
+    // --strict lo vuelve una compuerta: falla si algo se satura.
+    expect((await cli(dir, 'simulate', '1500', '--system', 'home-banking', '--strict')).code).toBe(1);
+    expect((await cli(dir, 'simulate', '200', '--system', 'home-banking', '--strict')).code).toBe(0);
+  });
+
+  it('rechaza un ambiente que no existe y pide un número', async () => {
+    const dir = tempWorkspace(demoModel());
+    const env = await cli(dir, 'simulate', '100', '--env', 'staging');
+    expect(env.code).toBe(1);
+    expect(env.err).toContain('[not-found]');
+    expect((await cli(dir, 'simulate', 'mucho')).code).toBe(2);
   });
 });
 

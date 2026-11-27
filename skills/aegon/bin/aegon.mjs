@@ -1059,7 +1059,7 @@ function datetime(args) {
 }
 const anyString = /^[\s\S]{0,}$/;
 const integer = /^-?\d+$/;
-const number$1 = /^-?\d+(?:\.\d+)?$/;
+const number$2 = /^-?\d+(?:\.\d+)?$/;
 const boolean$1 = /^(?:true|false)$/i;
 const lowercase = /^[^A-Z]*$/;
 const uppercase = /^[^a-z]*$/;
@@ -1842,7 +1842,7 @@ const $ZodJWT = $constructor("$ZodJWT", (inst, def) => {
 });
 const $ZodNumber = $constructor("$ZodNumber", (inst, def) => {
 	$ZodType.init(inst, def);
-	inst._zod.pattern = number$1;
+	inst._zod.pattern = number$2;
 	inst._zod.parse = (payload, _ctx) => {
 		if (def.coerce) try {
 			payload.value = Number(payload.value);
@@ -2543,7 +2543,7 @@ const $ZodRecord = $constructor("$ZodRecord", (inst, def) => {
 					issues: []
 				}, ctx);
 				if (keyResult instanceof Promise) throw new Error("Async schemas not supported in object keys currently");
-				if (typeof key === "string" && number$1.test(key) && keyResult.issues.length) {
+				if (typeof key === "string" && number$2.test(key) && keyResult.issues.length) {
 					const retryResult = def.keyType._zod.run({
 						value: Number(key),
 						issues: []
@@ -4461,7 +4461,7 @@ function stringifyKeyNames(bySchema, json, visited) {
 	else if (typeof rest.const === "number") rest.const = String(rest.const);
 	if (!numericType) return rest;
 	rest.type = "string";
-	if (!values) rest.pattern = (types.includes("number") ? number$1 : integer).source;
+	if (!values) rest.pattern = (types.includes("number") ? number$2 : integer).source;
 	return rest;
 }
 /** Every record of one conversion, so the carriers are found in a single pass rather than once per record. */
@@ -5158,7 +5158,7 @@ const ZodNumber = $constructor("ZodNumber", (inst, def) => {
 		return this;
 	}
 }));
-function number(params) {
+function number$1(params) {
 	return _number(ZodNumber, params);
 }
 const ZodNumberFormat = $constructor("ZodNumberFormat", (inst, def) => {
@@ -5575,9 +5575,14 @@ const DEPLOYMENT_KINDS = [
 	"instance"
 ];
 _enum(ELEMENT_KINDS);
+/**
+* Qué pasa con el elemento: `planned` es nuevo (todavía no existe), `live` ya existe, `changing`
+* existe y se modifica, `deprecated` se da de baja y `retired` ya no está.
+*/
 const STATUSES = [
 	"planned",
 	"live",
+	"changing",
 	"deprecated",
 	"retired"
 ];
@@ -5600,9 +5605,9 @@ const Properties = record(string(), string());
 const FinOps = object({
 	/** Costo por ambiente (clave: ID de un ambiente del workspace). */
 	costs: record(Id, object({
-		monthly: number().nonnegative(),
+		monthly: number$1().nonnegative(),
 		/** Réplicas, instancias o nodos. */
-		replicas: number().int().positive().optional(),
+		replicas: number$1().int().positive().optional(),
 		/** Tamaño o SKU (ej. `m6i.large`, `db.r6g.xlarge`, `Standard_D4s_v5`). */
 		sku: string().optional(),
 		note: string().optional()
@@ -5644,10 +5649,15 @@ const softwareFields = {
 	technology: array(string()).optional(),
 	risk: Risk.optional()
 };
+/** Datos para el simulador de carga. Todo es opcional: lo que falta se supone por tipo. */
+const LoadProfile = object({
+/** Pedidos por segundo que atiende una réplica. */
+capacity: number$1().positive().optional() });
 const System = object({
 	...baseElement,
 	...softwareFields,
-	kind: literal("system")
+	kind: literal("system"),
+	load: LoadProfile.optional()
 });
 const CONTAINER_TYPES = [
 	"web",
@@ -5664,7 +5674,8 @@ const Container = object({
 	...baseElement,
 	...softwareFields,
 	kind: literal("container"),
-	containerType: ContainerType.optional()
+	containerType: ContainerType.optional(),
+	load: LoadProfile.optional()
 });
 const Component = object({
 	...baseElement,
@@ -5700,7 +5711,8 @@ const Store = object({
 	...baseElement,
 	kind: literal("store"),
 	risk: Risk.optional(),
-	store: StoreDetails
+	store: StoreDetails,
+	load: LoadProfile.optional()
 });
 const BusType = _enum([
 	"queue",
@@ -5723,7 +5735,8 @@ const Bus = object({
 	...baseElement,
 	kind: literal("bus"),
 	risk: Risk.optional(),
-	bus: BusDetails
+	bus: BusDetails,
+	load: LoadProfile.optional()
 });
 const GROUP_PROVIDERS = [
 	"aws",
@@ -5772,7 +5785,7 @@ const NodeDetails = object({
 	/** Tamaño o tipo de instancia (`m5.2xlarge`, `Standard_D4s_v5`). */
 	size: string().optional(),
 	/** Cantidad de nodos iguales (C4: "x N"). */
-	instances: number().int().positive().optional()
+	instances: number$1().int().positive().optional()
 });
 /**
 * Nodo de despliegue: algo que ejecuta o aloja software (datacenter, nube, VPC, clúster,
@@ -5840,23 +5853,50 @@ const Element = discriminatedUnion("kind", [
 			/** Elemento desplegado (container, store, bus o system). */
 			of: Id,
 			/** Réplicas (pods, procesos). */
-			replicas: number().int().positive().optional()
+			replicas: number$1().int().positive().optional()
 		}),
 		addresses: Addresses.optional(),
 		resource: string().optional()
 	})
 ]);
 const Direction = _enum(["outgoing", "bidirectional"]);
+const Port = number$1().int().min(1).max(65535);
+/** Un protocolo de una relación con los puertos de destino por los que va. */
+const ProtocolUse = object({
+	id: string().min(1),
+	ports: array(Port).min(1)
+});
+const Protocols = array(union([string().min(1), ProtocolUse]));
+/**
+* Lo que va en el otro sentido de una relación bidireccional (de `to` hacia `from`): su propia
+* etiqueta y sus protocolos, con los puertos por los que escucha `from`.
+*/
+const RelationBack = object({
+	label: string().optional(),
+	protocols: Protocols.optional(),
+	ports: array(Port).optional()
+});
 const Relation = object({
 	id: Id,
 	from: Id,
 	to: Id,
 	label: string().optional(),
 	description: string().optional(),
-	/** Protocolos de la comunicación (catálogo `PROTOCOLS`: `https`, `grpc`, `jdbc`, `kafka`…). */
-	protocols: array(string()).optional(),
-	/** Puertos de destino (`443`, `8080`). */
-	ports: array(number().int().min(1).max(65535)).optional(),
+	/**
+	* Protocolos de la comunicación (catálogo `PROTOCOLS`: `https`, `grpc`, `jdbc`, `kafka`…). Cada
+	* uno es su ID o, para decir por qué puertos va, `{ id: dns, ports: [53] }`. En una relación
+	* bidireccional son los de la ida (de `from` hacia `to`); los de la vuelta van en `back`.
+	*/
+	protocols: Protocols.optional(),
+	/** Puertos de destino que no están asignados a un protocolo (`443`, `8080`). */
+	ports: array(Port).optional(),
+	/** Solo en una relación bidireccional: etiqueta y protocolos del sentido contrario. */
+	back: RelationBack.optional(),
+	/**
+	* Simulador de carga: llamadas al destino por cada pedido que atiende el origen. Por defecto 1
+	* (cada pedido lo usa); 0.5 es uno de cada dos y 3 es tres llamadas por pedido.
+	*/
+	calls: number$1().nonnegative().optional(),
 	/** Por defecto `outgoing`. */
 	direction: Direction.optional(),
 	status: Status.optional(),
@@ -5871,18 +5911,53 @@ const Level = union([
 	literal("deployment")
 ]);
 const NodeLayout = object({
-	x: number(),
-	y: number(),
-	w: number().positive().optional(),
-	h: number().positive().optional()
+	x: number$1(),
+	y: number$1(),
+	w: number$1().positive().optional(),
+	h: number$1().positive().optional()
+});
+const EdgeShape = _enum([
+	"curved",
+	"straight",
+	"step"
+]);
+/** Punto del lienzo (coordenadas absolutas, como las de los nodos). */
+const EdgePoint = object({
+	x: number$1(),
+	y: number$1()
+});
+/**
+* Dónde toca una flecha a un elemento: el lado y la posición sobre ese lado, de 0 a 1 (de izquierda
+* a derecha o de arriba hacia abajo). Sin `at`, al medio.
+*/
+const EdgeAnchor = object({
+	side: _enum([
+		"top",
+		"right",
+		"bottom",
+		"left"
+	]),
+	at: number$1().min(0).max(1).optional()
 });
 const EdgeStyle = object({
-	shape: _enum([
-		"curved",
-		"straight",
-		"step"
-	]).optional(),
-	hidden: boolean().optional()
+	shape: EdgeShape.optional(),
+	hidden: boolean().optional(),
+	/** Punta fija en el origen: la flecha sale de ese lado en vez del que elige el lienzo. */
+	from: EdgeAnchor.optional(),
+	/** Punta fija en el destino. */
+	to: EdgeAnchor.optional(),
+	/**
+	* Recorrido acomodado a mano: la flecha pasa por estos puntos, en orden, entre el origen y el
+	* destino. Sin el campo, el lienzo la traza sola.
+	*/
+	points: array(EdgePoint).max(32).optional(),
+	/**
+	* Etiqueta movida a mano: a qué altura del trazo va (0 = origen, 1 = destino). Sin el campo, la
+	* ubica el lienzo donde no tape nada.
+	*/
+	labelAt: number$1().min(0).max(1).optional(),
+	/** Lo mismo para la etiqueta de la vuelta de una relación bidireccional. */
+	backLabelAt: number$1().min(0).max(1).optional()
 });
 const View = object({
 	id: Id,
@@ -5923,7 +5998,7 @@ const FinOpsSettings = object({
 	/** Claves de etiquetas FinOps que se sugieren al cargar costos. */
 	tagKeys: array(string().min(1)).optional(),
 	/** Presupuesto mensual por ambiente. */
-	budgets: record(Id, number().nonnegative()).optional()
+	budgets: record(Id, number$1().nonnegative()).optional()
 });
 const WorkspaceMeta = object({
 	schema: literal(2),
@@ -6045,8 +6120,8 @@ const Comment = object({
 	* Posición en el lienzo. Con `element`, es relativa a la esquina del elemento (el comentario se
 	* mueve con él); sin `element`, es absoluta.
 	*/
-	x: number(),
-	y: number(),
+	x: number$1(),
+	y: number$1(),
 	element: Id.optional(),
 	/** Por defecto `message`. */
 	icon: CommentIcon.optional(),
@@ -6400,9 +6475,1806 @@ function projectedEdges(model, view, explicit) {
 	}
 	return [...out.values()];
 }
+/**
+* Sistemas en juego en un ambiente: los de sus lienzos de despliegue y los que ya tienen algo
+* desplegado ahí.
+*/
+function systemsInPlay(model, env) {
+	const systems = new Set();
+	for (const view of sortedValues(model.views)) if (view.level === "deployment" && view.environment === env && view.scope) systems.add(view.scope);
+	for (const el of sortedValues(model.elements)) {
+		if (el.kind !== "instance" || !inEnvironment$1(el, env)) continue;
+		const target = model.elements[el.instance.of];
+		if (!target || target.kind === "system") continue;
+		const sys = [target, ...ancestorsOf(model, target.id)].find((e) => e.kind === "system");
+		if (sys) systems.add(sys.id);
+	}
+	return [...systems];
+}
+/**
+* Lo que falta desplegar en un ambiente: contenedores, bases y buses de esos sistemas que valen
+* para el ambiente y todavía no tienen ninguna instancia en él.
+*/
+function undeployedIn(model, env, systems) {
+	const deployed = new Set();
+	for (const el of Object.values(model.elements)) if (el.kind === "instance" && inEnvironment$1(el, env)) deployed.add(el.instance.of);
+	const out = [];
+	const seen = new Set();
+	for (const sys of systems) for (const id of descendantsOf(model, sys)) {
+		const el = model.elements[id];
+		if (!el || seen.has(id) || !(el.kind === "container" || el.kind === "store" || el.kind === "bus")) continue;
+		seen.add(id);
+		if (inEnvironment$1(el, env) && !deployed.has(id)) out.push(el);
+	}
+	return out;
+}
+/**
+* ¿El ambiente es el productivo? Se reconoce por el nombre o el ID ("prod", "producción"); si
+* ninguno lo dice, es el último de la lista (el orden habitual es de desarrollo a producción).
+*/
+function isProductionEnvironment(model, env) {
+	const envs = model.workspace.environments ?? [];
+	const looksProd = (e) => /prod/i.test(`${e.id} ${e.name}`) && !/pre[\s_-]?prod|no[\s_-]?prod|non[\s_-]?prod/i.test(`${e.id} ${e.name}`);
+	const named = envs.filter(looksProd);
+	if (named.length) return named.some((e) => e.id === env);
+	return envs.length > 0 && envs[envs.length - 1].id === env;
+}
 /** Relaciones de red que tocan algún elemento de despliegue. */
 function isNetworkRelation(model, rel) {
 	return [model.elements[rel.from], model.elements[rel.to]].some((e) => !!e && isDeploymentKind(e.kind));
+}
+//#endregion
+//#region packages/core/src/catalog/index.ts
+const DB_ENGINES = [
+	{
+		id: "postgresql",
+		name: "PostgreSQL",
+		icon: "postgresql",
+		type: "relational",
+		keywords: ["postgres", "pg"]
+	},
+	{
+		id: "mysql",
+		name: "MySQL",
+		icon: "mysql",
+		type: "relational"
+	},
+	{
+		id: "mariadb",
+		name: "MariaDB",
+		icon: "mariadb",
+		type: "relational"
+	},
+	{
+		id: "sqlserver",
+		name: "SQL Server",
+		icon: "microsoftsqlserver",
+		type: "relational",
+		keywords: ["mssql"]
+	},
+	{
+		id: "oracle",
+		name: "Oracle Database",
+		icon: "oracle",
+		type: "relational"
+	},
+	{
+		id: "db2",
+		name: "IBM Db2",
+		icon: "ibm",
+		type: "relational"
+	},
+	{
+		id: "sqlite",
+		name: "SQLite",
+		icon: "sqlite",
+		type: "relational"
+	},
+	{
+		id: "aurora",
+		name: "Amazon Aurora",
+		icon: "amazonrds",
+		type: "relational",
+		keywords: ["rds", "aws"]
+	},
+	{
+		id: "cloudsql",
+		name: "Cloud SQL",
+		icon: "googlecloud",
+		type: "relational",
+		keywords: ["gcp"]
+	},
+	{
+		id: "cockroachdb",
+		name: "CockroachDB",
+		icon: "cockroachlabs",
+		type: "relational"
+	},
+	{
+		id: "mongodb",
+		name: "MongoDB",
+		icon: "mongodb",
+		type: "document",
+		keywords: ["mongo"]
+	},
+	{
+		id: "couchbase",
+		name: "Couchbase",
+		icon: "couchbase",
+		type: "document"
+	},
+	{
+		id: "firestore",
+		name: "Firestore",
+		icon: "firebase",
+		type: "document",
+		keywords: ["firebase"]
+	},
+	{
+		id: "cosmosdb",
+		name: "Cosmos DB",
+		icon: "azurecosmosdb",
+		type: "document",
+		keywords: ["azure"]
+	},
+	{
+		id: "dynamodb",
+		name: "DynamoDB",
+		icon: "amazondynamodb",
+		type: "key-value",
+		keywords: ["aws", "dynamo"]
+	},
+	{
+		id: "cassandra",
+		name: "Cassandra",
+		icon: "apachecassandra",
+		type: "key-value"
+	},
+	{
+		id: "redis",
+		name: "Redis",
+		icon: "redis",
+		type: "cache"
+	},
+	{
+		id: "memcached",
+		name: "Memcached",
+		icon: "memcached",
+		type: "cache"
+	},
+	{
+		id: "elasticsearch",
+		name: "Elasticsearch",
+		icon: "elasticsearch",
+		type: "search",
+		keywords: ["elastic"]
+	},
+	{
+		id: "opensearch",
+		name: "OpenSearch",
+		icon: "opensearch",
+		type: "search"
+	},
+	{
+		id: "s3",
+		name: "Amazon S3",
+		icon: "amazons3",
+		type: "object",
+		keywords: ["aws", "bucket"]
+	},
+	{
+		id: "gcs",
+		name: "Cloud Storage",
+		icon: "googlecloudstorage",
+		type: "object",
+		keywords: ["gcp", "bucket"]
+	},
+	{
+		id: "blob",
+		name: "Azure Blob Storage",
+		icon: "microsoftazure",
+		type: "object",
+		keywords: ["azure"]
+	},
+	{
+		id: "neo4j",
+		name: "Neo4j",
+		icon: "neo4j",
+		type: "graph"
+	},
+	{
+		id: "influxdb",
+		name: "InfluxDB",
+		icon: "influxdb",
+		type: "time-series"
+	},
+	{
+		id: "timescaledb",
+		name: "TimescaleDB",
+		icon: "timescale",
+		type: "time-series"
+	},
+	{
+		id: "snowflake",
+		name: "Snowflake",
+		icon: "snowflake",
+		type: "warehouse"
+	},
+	{
+		id: "bigquery",
+		name: "BigQuery",
+		icon: "googlebigquery",
+		type: "warehouse",
+		keywords: ["gcp"]
+	},
+	{
+		id: "redshift",
+		name: "Amazon Redshift",
+		icon: "amazonredshift",
+		type: "warehouse",
+		keywords: ["aws"]
+	},
+	{
+		id: "clickhouse",
+		name: "ClickHouse",
+		icon: "clickhouse",
+		type: "warehouse"
+	}
+];
+const MESSAGE_BROKERS = [
+	{
+		id: "kafka",
+		name: "Apache Kafka",
+		icon: "apachekafka",
+		type: "stream",
+		protocol: "kafka",
+		keywords: ["confluent", "msk"]
+	},
+	{
+		id: "rabbitmq",
+		name: "RabbitMQ",
+		icon: "rabbitmq",
+		type: "queue",
+		protocol: "amqp"
+	},
+	{
+		id: "activemq",
+		name: "ActiveMQ",
+		icon: "apacheactivemq",
+		type: "queue",
+		protocol: "jms",
+		keywords: ["artemis"]
+	},
+	{
+		id: "pulsar",
+		name: "Apache Pulsar",
+		icon: "apachepulsar",
+		type: "stream",
+		protocol: "pulsar"
+	},
+	{
+		id: "nats",
+		name: "NATS",
+		icon: "natsdotio",
+		type: "topic",
+		protocol: "nats",
+		keywords: ["jetstream"]
+	},
+	{
+		id: "redis-streams",
+		name: "Redis Streams",
+		icon: "redis",
+		type: "stream",
+		protocol: "resp"
+	},
+	{
+		id: "mosquitto",
+		name: "MQTT (Mosquitto)",
+		icon: "eclipsemosquitto",
+		type: "topic",
+		protocol: "mqtt",
+		keywords: ["iot"]
+	},
+	{
+		id: "ibm-mq",
+		name: "IBM MQ",
+		icon: "ibm",
+		type: "queue",
+		protocol: "jms",
+		keywords: ["websphere"]
+	},
+	{
+		id: "sqs",
+		name: "Amazon SQS",
+		icon: "amazonsqs",
+		type: "queue",
+		protocol: "https",
+		keywords: ["aws"]
+	},
+	{
+		id: "sns",
+		name: "Amazon SNS",
+		icon: "amazonsns",
+		type: "topic",
+		protocol: "https",
+		keywords: ["aws"]
+	},
+	{
+		id: "eventbridge",
+		name: "Amazon EventBridge",
+		icon: "amazoneventbridge",
+		type: "event-bus",
+		protocol: "https",
+		keywords: ["aws"]
+	},
+	{
+		id: "kinesis",
+		name: "Amazon Kinesis",
+		icon: "amazonkinesis",
+		type: "stream",
+		protocol: "https",
+		keywords: ["aws"]
+	},
+	{
+		id: "pubsub",
+		name: "Google Pub/Sub",
+		icon: "googlepubsub",
+		type: "topic",
+		protocol: "grpc",
+		keywords: ["gcp"]
+	},
+	{
+		id: "service-bus",
+		name: "Azure Service Bus",
+		icon: "azureservicebus",
+		type: "queue",
+		protocol: "amqp",
+		keywords: ["azure"]
+	},
+	{
+		id: "event-hubs",
+		name: "Azure Event Hubs",
+		icon: "azureeventhubs",
+		type: "stream",
+		protocol: "kafka",
+		keywords: ["azure"]
+	}
+];
+const TECHNOLOGIES = [
+	{
+		id: "java",
+		name: "Java",
+		icon: "openjdk",
+		category: "language"
+	},
+	{
+		id: "kotlin",
+		name: "Kotlin",
+		icon: "kotlin",
+		category: "language"
+	},
+	{
+		id: "typescript",
+		name: "TypeScript",
+		icon: "typescript",
+		category: "language",
+		keywords: ["ts"]
+	},
+	{
+		id: "javascript",
+		name: "JavaScript",
+		icon: "javascript",
+		category: "language",
+		keywords: ["js"]
+	},
+	{
+		id: "python",
+		name: "Python",
+		icon: "python",
+		category: "language"
+	},
+	{
+		id: "go",
+		name: "Go",
+		icon: "go",
+		category: "language",
+		keywords: ["golang"]
+	},
+	{
+		id: "dotnet",
+		name: ".NET",
+		icon: "dotnet",
+		category: "language",
+		keywords: ["csharp", "c#"]
+	},
+	{
+		id: "php",
+		name: "PHP",
+		icon: "php",
+		category: "language"
+	},
+	{
+		id: "ruby",
+		name: "Ruby",
+		icon: "ruby",
+		category: "language"
+	},
+	{
+		id: "rust",
+		name: "Rust",
+		icon: "rust",
+		category: "language"
+	},
+	{
+		id: "scala",
+		name: "Scala",
+		icon: "scala",
+		category: "language"
+	},
+	{
+		id: "swift",
+		name: "Swift",
+		icon: "swift",
+		category: "language"
+	},
+	{
+		id: "dart",
+		name: "Dart",
+		icon: "dart",
+		category: "language"
+	},
+	{
+		id: "elixir",
+		name: "Elixir",
+		icon: "elixir",
+		category: "language"
+	},
+	{
+		id: "spring-boot",
+		name: "Spring Boot",
+		icon: "springboot",
+		category: "backend",
+		keywords: ["spring"]
+	},
+	{
+		id: "quarkus",
+		name: "Quarkus",
+		icon: "quarkus",
+		category: "backend"
+	},
+	{
+		id: "nodejs",
+		name: "Node.js",
+		icon: "nodedotjs",
+		category: "backend",
+		keywords: ["node"]
+	},
+	{
+		id: "nestjs",
+		name: "NestJS",
+		icon: "nestjs",
+		category: "backend"
+	},
+	{
+		id: "express",
+		name: "Express",
+		icon: "express",
+		category: "backend"
+	},
+	{
+		id: "fastapi",
+		name: "FastAPI",
+		icon: "fastapi",
+		category: "backend"
+	},
+	{
+		id: "django",
+		name: "Django",
+		icon: "django",
+		category: "backend"
+	},
+	{
+		id: "flask",
+		name: "Flask",
+		icon: "flask",
+		category: "backend"
+	},
+	{
+		id: "laravel",
+		name: "Laravel",
+		icon: "laravel",
+		category: "backend"
+	},
+	{
+		id: "rails",
+		name: "Ruby on Rails",
+		icon: "rubyonrails",
+		category: "backend"
+	},
+	{
+		id: "react",
+		name: "React",
+		icon: "react",
+		category: "frontend"
+	},
+	{
+		id: "nextjs",
+		name: "Next.js",
+		icon: "nextdotjs",
+		category: "frontend"
+	},
+	{
+		id: "angular",
+		name: "Angular",
+		icon: "angular",
+		category: "frontend"
+	},
+	{
+		id: "vue",
+		name: "Vue",
+		icon: "vuedotjs",
+		category: "frontend"
+	},
+	{
+		id: "svelte",
+		name: "Svelte",
+		icon: "svelte",
+		category: "frontend"
+	},
+	{
+		id: "flutter",
+		name: "Flutter",
+		icon: "flutter",
+		category: "mobile"
+	},
+	{
+		id: "react-native",
+		name: "React Native",
+		icon: "react",
+		category: "mobile"
+	},
+	{
+		id: "android",
+		name: "Android",
+		icon: "android",
+		category: "mobile"
+	},
+	{
+		id: "ios",
+		name: "iOS",
+		icon: "apple",
+		category: "mobile"
+	},
+	{
+		id: "docker",
+		name: "Docker",
+		icon: "docker",
+		category: "platform"
+	},
+	{
+		id: "kubernetes",
+		name: "Kubernetes",
+		icon: "kubernetes",
+		category: "platform",
+		keywords: ["k8s"]
+	},
+	{
+		id: "nginx",
+		name: "NGINX",
+		icon: "nginx",
+		category: "platform"
+	},
+	{
+		id: "apache",
+		name: "Apache HTTP",
+		icon: "apache",
+		category: "platform"
+	},
+	{
+		id: "kong",
+		name: "Kong",
+		icon: "kong",
+		category: "platform",
+		keywords: ["gateway"]
+	},
+	{
+		id: "istio",
+		name: "Istio",
+		icon: "istio",
+		category: "platform"
+	},
+	{
+		id: "terraform",
+		name: "Terraform",
+		icon: "terraform",
+		category: "platform"
+	},
+	{
+		id: "aws-lambda",
+		name: "AWS Lambda",
+		icon: "awslambda",
+		category: "platform",
+		keywords: ["lambda", "serverless"]
+	},
+	{
+		id: "cloud-run",
+		name: "Cloud Run",
+		icon: "googlecloud",
+		category: "platform"
+	},
+	{
+		id: "cloud-functions",
+		name: "Cloud Functions",
+		icon: "googlecloud",
+		category: "platform"
+	},
+	{
+		id: "azure-functions",
+		name: "Azure Functions",
+		icon: "azurefunctions",
+		category: "platform"
+	},
+	{
+		id: "openshift",
+		name: "OpenShift",
+		icon: "redhatopenshift",
+		category: "platform",
+		keywords: [
+			"ocp",
+			"red hat",
+			"k8s"
+		]
+	},
+	{
+		id: "rosa",
+		name: "Red Hat OpenShift on AWS",
+		icon: "redhatopenshift",
+		category: "platform",
+		keywords: [
+			"rosa",
+			"ocp",
+			"aws"
+		]
+	},
+	{
+		id: "vmware",
+		name: "VMware vSphere",
+		icon: "vmware",
+		category: "platform",
+		keywords: ["esxi", "vm"]
+	},
+	{
+		id: "linux",
+		name: "Linux",
+		icon: "linux",
+		category: "platform",
+		keywords: ["rhel", "ubuntu"]
+	},
+	{
+		id: "windows-server",
+		name: "Windows Server",
+		icon: "glyph:server",
+		category: "platform",
+		keywords: ["windows", "iis"]
+	},
+	{
+		id: "aws-ec2",
+		name: "Amazon EC2",
+		icon: "glyph:server",
+		category: "infrastructure",
+		keywords: [
+			"aws",
+			"instancia",
+			"vm"
+		]
+	},
+	{
+		id: "aws-vpc",
+		name: "Amazon VPC",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: ["aws", "red"]
+	},
+	{
+		id: "aws-alb",
+		name: "AWS Application Load Balancer",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"alb",
+			"elb",
+			"load balancer",
+			"balanceador"
+		]
+	},
+	{
+		id: "aws-nlb",
+		name: "AWS Network Load Balancer",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"nlb",
+			"elb",
+			"load balancer",
+			"balanceador"
+		]
+	},
+	{
+		id: "route53",
+		name: "Amazon Route 53",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"route 53",
+			"dns",
+			"aws"
+		]
+	},
+	{
+		id: "aws-direct-connect",
+		name: "AWS Direct Connect",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"direct connect",
+			"dx",
+			"enlace",
+			"aws"
+		]
+	},
+	{
+		id: "aws-security-group",
+		name: "AWS Security Group",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"security group",
+			"sg",
+			"aws"
+		]
+	},
+	{
+		id: "aws-nat-gateway",
+		name: "AWS NAT Gateway",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"nat",
+			"egress",
+			"aws"
+		]
+	},
+	{
+		id: "aws-api-gateway",
+		name: "Amazon API Gateway",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: ["api gateway", "aws"]
+	},
+	{
+		id: "cloudfront",
+		name: "Amazon CloudFront",
+		icon: "glyph:globe",
+		category: "infrastructure",
+		keywords: ["cdn", "aws"]
+	},
+	{
+		id: "aws-waf",
+		name: "AWS WAF",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: ["waf", "aws"]
+	},
+	{
+		id: "azure-front-door",
+		name: "Azure Front Door",
+		icon: "glyph:globe",
+		category: "infrastructure",
+		keywords: [
+			"cdn",
+			"waf",
+			"azure"
+		]
+	},
+	{
+		id: "azure-apim",
+		name: "Azure API Management",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"apim",
+			"api manager",
+			"azure"
+		]
+	},
+	{
+		id: "fortigate",
+		name: "FortiGate",
+		icon: "fortinet",
+		category: "infrastructure",
+		keywords: [
+			"fortinet",
+			"firewall",
+			"fg"
+		]
+	},
+	{
+		id: "palo-alto",
+		name: "Palo Alto NGFW",
+		icon: "paloaltonetworks",
+		category: "infrastructure",
+		keywords: ["firewall"]
+	},
+	{
+		id: "cisco",
+		name: "Cisco",
+		icon: "cisco",
+		category: "infrastructure",
+		keywords: [
+			"router",
+			"switch",
+			"asa"
+		]
+	},
+	{
+		id: "f5",
+		name: "F5 BIG-IP",
+		icon: "f5",
+		category: "infrastructure",
+		keywords: [
+			"load balancer",
+			"balanceador",
+			"waf"
+		]
+	},
+	{
+		id: "haproxy",
+		name: "HAProxy",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: ["load balancer", "balanceador"]
+	},
+	{
+		id: "traefik",
+		name: "Traefik",
+		icon: "traefikproxy",
+		category: "infrastructure",
+		keywords: ["ingress", "proxy"]
+	},
+	{
+		id: "envoy",
+		name: "Envoy",
+		icon: "envoyproxy",
+		category: "infrastructure",
+		keywords: ["proxy", "mesh"]
+	},
+	{
+		id: "cloudflare",
+		name: "Cloudflare",
+		icon: "cloudflare",
+		category: "infrastructure",
+		keywords: [
+			"cdn",
+			"dns",
+			"waf"
+		]
+	},
+	{
+		id: "apim",
+		name: "API Manager",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"apim",
+			"gateway",
+			"api gateway"
+		]
+	},
+	{
+		id: "active-directory",
+		name: "Active Directory",
+		icon: "glyph:server",
+		category: "infrastructure",
+		keywords: [
+			"ad",
+			"ad ds",
+			"directorio activo",
+			"controlador de dominio",
+			"domain controller",
+			"dominio",
+			"ldap",
+			"kerberos",
+			"microsoft"
+		]
+	},
+	{
+		id: "dns-server",
+		name: "DNS",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"servidor dns",
+			"bind",
+			"named",
+			"resolver",
+			"nombres",
+			"unbound",
+			"windows dns"
+		]
+	},
+	{
+		id: "ntp-server",
+		name: "NTP",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: [
+			"servidor ntp",
+			"hora",
+			"time",
+			"chrony",
+			"reloj",
+			"w32time"
+		]
+	},
+	{
+		id: "dhcp-server",
+		name: "DHCP",
+		icon: "glyph:network",
+		category: "infrastructure",
+		keywords: ["servidor dhcp", "direcciones"]
+	},
+	{
+		id: "file-server",
+		name: "Servidor de archivos",
+		icon: "glyph:file",
+		category: "infrastructure",
+		keywords: [
+			"file server",
+			"smb",
+			"nfs",
+			"nas",
+			"carpetas compartidas"
+		]
+	},
+	{
+		id: "iis",
+		name: "IIS",
+		icon: "glyph:globe",
+		category: "platform",
+		keywords: [
+			"internet information services",
+			"windows",
+			"web server"
+		]
+	},
+	{
+		id: "hyper-v",
+		name: "Hyper-V",
+		icon: "glyph:server",
+		category: "platform",
+		keywords: [
+			"hyperv",
+			"virtualización",
+			"vm",
+			"microsoft"
+		]
+	},
+	{
+		id: "entra-id",
+		name: "Microsoft Entra ID",
+		icon: "glyph:plug",
+		category: "saas",
+		keywords: [
+			"azure ad",
+			"aad",
+			"sso",
+			"microsoft"
+		]
+	},
+	{
+		id: "keycloak",
+		name: "Keycloak",
+		icon: "keycloak",
+		category: "saas",
+		keywords: ["iam", "sso"]
+	},
+	{
+		id: "auth0",
+		name: "Auth0",
+		icon: "auth0",
+		category: "saas"
+	},
+	{
+		id: "okta",
+		name: "Okta",
+		icon: "okta",
+		category: "saas"
+	},
+	{
+		id: "salesforce",
+		name: "Salesforce",
+		icon: "salesforce",
+		category: "saas"
+	},
+	{
+		id: "sap",
+		name: "SAP",
+		icon: "sap",
+		category: "saas"
+	}
+];
+/** Tipos de elemento que llevan el campo `technology`. */
+const KINDS_WITH_TECHNOLOGY = [
+	"system",
+	"container",
+	"component",
+	"node",
+	"infra"
+];
+const API_TARGETS = {
+	kinds: [
+		"system",
+		"container",
+		"component"
+	],
+	containerTypes: [
+		"web",
+		"api",
+		"service",
+		"function"
+	]
+};
+/** Ordenados por grupo y, dentro de cada grupo, de más a menos habitual. */
+const PROTOCOLS = [
+	{
+		id: "https",
+		port: 443,
+		name: "HTTPS",
+		icon: "glyph:globe",
+		group: "web",
+		fits: API_TARGETS,
+		keywords: ["http", "tls"]
+	},
+	{
+		id: "rest",
+		name: "REST/JSON",
+		icon: "glyph:globe",
+		group: "web",
+		fits: API_TARGETS,
+		keywords: ["json", "http"]
+	},
+	{
+		id: "grpc",
+		name: "gRPC",
+		icon: "glyph:plug",
+		group: "web",
+		fits: { containerTypes: ["api", "service"] },
+		keywords: ["protobuf"]
+	},
+	{
+		id: "graphql",
+		name: "GraphQL",
+		icon: "graphql",
+		group: "web",
+		fits: { containerTypes: ["api", "web"] }
+	},
+	{
+		id: "websocket",
+		name: "WebSocket",
+		icon: "glyph:plug",
+		group: "web",
+		keywords: ["ws", "tiempo real"]
+	},
+	{
+		id: "sse",
+		name: "Server-Sent Events",
+		icon: "glyph:plug",
+		group: "web",
+		keywords: ["sse", "stream"]
+	},
+	{
+		id: "soap",
+		name: "SOAP/XML",
+		icon: "glyph:file",
+		group: "web",
+		keywords: ["xml", "wsdl"]
+	},
+	{
+		id: "webhook",
+		name: "Webhook",
+		icon: "glyph:plug",
+		group: "web",
+		keywords: ["callback"]
+	},
+	{
+		id: "http",
+		port: 80,
+		name: "HTTP (sin TLS)",
+		icon: "glyph:globe",
+		group: "web"
+	},
+	{
+		id: "kafka",
+		port: 9092,
+		name: "Kafka",
+		icon: "apachekafka",
+		group: "messaging",
+		fits: { brokers: ["kafka", "event-hubs"] }
+	},
+	{
+		id: "amqp",
+		port: 5672,
+		name: "AMQP",
+		icon: "rabbitmq",
+		group: "messaging",
+		fits: { brokers: [
+			"rabbitmq",
+			"service-bus",
+			"activemq"
+		] }
+	},
+	{
+		id: "jms",
+		name: "JMS",
+		icon: "glyph:queue",
+		group: "messaging",
+		fits: { brokers: ["activemq", "ibm-mq"] }
+	},
+	{
+		id: "mqtt",
+		port: 1883,
+		name: "MQTT",
+		icon: "glyph:queue",
+		group: "messaging",
+		fits: { brokers: ["mosquitto"] },
+		keywords: ["iot"]
+	},
+	{
+		id: "nats",
+		port: 4222,
+		name: "NATS",
+		icon: "natsdotio",
+		group: "messaging",
+		fits: { brokers: ["nats"] }
+	},
+	{
+		id: "pulsar",
+		port: 6650,
+		name: "Pulsar",
+		icon: "apachepulsar",
+		group: "messaging",
+		fits: { brokers: ["pulsar"] }
+	},
+	{
+		id: "stomp",
+		port: 61613,
+		name: "STOMP",
+		icon: "glyph:queue",
+		group: "messaging",
+		fits: { brokers: ["activemq", "rabbitmq"] }
+	},
+	{
+		id: "jdbc",
+		name: "JDBC",
+		icon: "glyph:database",
+		group: "data",
+		fits: { storeTypes: [
+			"relational",
+			"warehouse",
+			"time-series"
+		] }
+	},
+	{
+		id: "sql",
+		name: "SQL (driver nativo)",
+		icon: "glyph:database",
+		group: "data",
+		fits: { storeTypes: [
+			"relational",
+			"warehouse",
+			"time-series"
+		] },
+		keywords: [
+			"tcp",
+			"postgres",
+			"mysql"
+		]
+	},
+	{
+		id: "odbc",
+		name: "ODBC",
+		icon: "glyph:database",
+		group: "data",
+		fits: { storeTypes: ["relational", "warehouse"] }
+	},
+	{
+		id: "mongodb-wire",
+		port: 27017,
+		name: "MongoDB Wire",
+		icon: "mongodb",
+		group: "data",
+		fits: { engines: ["mongodb", "cosmosdb"] }
+	},
+	{
+		id: "resp",
+		port: 6379,
+		name: "Redis (RESP)",
+		icon: "redis",
+		group: "data",
+		fits: { engines: ["redis"] }
+	},
+	{
+		id: "memcached",
+		port: 11211,
+		name: "Memcached",
+		icon: "memcached",
+		group: "data",
+		fits: { engines: ["memcached"] }
+	},
+	{
+		id: "cql",
+		port: 9042,
+		name: "CQL",
+		icon: "apachecassandra",
+		group: "data",
+		fits: { engines: ["cassandra"] }
+	},
+	{
+		id: "bolt",
+		port: 7687,
+		name: "Bolt",
+		icon: "neo4j",
+		group: "data",
+		fits: { engines: ["neo4j"] }
+	},
+	{
+		id: "s3-api",
+		name: "S3 API",
+		icon: "amazons3",
+		group: "data",
+		fits: { storeTypes: ["object"] }
+	},
+	{
+		id: "search-api",
+		name: "API de búsqueda",
+		icon: "elasticsearch",
+		group: "data",
+		fits: { storeTypes: ["search"] }
+	},
+	{
+		id: "dynamodb-api",
+		name: "DynamoDB API",
+		icon: "amazondynamodb",
+		group: "data",
+		fits: { engines: ["dynamodb"] }
+	},
+	{
+		id: "sftp",
+		port: 22,
+		name: "SFTP",
+		icon: "glyph:file",
+		group: "files",
+		keywords: ["ssh"]
+	},
+	{
+		id: "ftps",
+		port: 21,
+		name: "FTP/FTPS",
+		icon: "glyph:file",
+		group: "files"
+	},
+	{
+		id: "smb",
+		port: 445,
+		name: "SMB/CIFS",
+		icon: "glyph:file",
+		group: "files"
+	},
+	{
+		id: "nfs",
+		port: 2049,
+		name: "NFS",
+		icon: "glyph:file",
+		group: "files"
+	},
+	{
+		id: "oauth2",
+		name: "OAuth 2.0",
+		icon: "glyph:plug",
+		group: "identity",
+		keywords: ["token"]
+	},
+	{
+		id: "oidc",
+		name: "OpenID Connect",
+		icon: "openid",
+		group: "identity",
+		keywords: ["sso"]
+	},
+	{
+		id: "saml",
+		name: "SAML 2.0",
+		icon: "glyph:plug",
+		group: "identity",
+		keywords: ["sso"]
+	},
+	{
+		id: "ldap",
+		port: 389,
+		name: "LDAP",
+		icon: "glyph:server",
+		group: "identity",
+		keywords: ["active directory"]
+	},
+	{
+		id: "kerberos",
+		port: 88,
+		name: "Kerberos",
+		icon: "glyph:server",
+		group: "identity"
+	},
+	{
+		id: "smtp",
+		port: 25,
+		name: "SMTP",
+		icon: "glyph:mail",
+		group: "email"
+	},
+	{
+		id: "imap",
+		port: 143,
+		name: "IMAP",
+		icon: "glyph:mail",
+		group: "email"
+	},
+	{
+		id: "tcp",
+		name: "TCP",
+		icon: "glyph:network",
+		group: "network"
+	},
+	{
+		id: "udp",
+		name: "UDP",
+		icon: "glyph:network",
+		group: "network"
+	},
+	{
+		id: "ssh",
+		port: 22,
+		name: "SSH",
+		icon: "glyph:server",
+		group: "network"
+	},
+	{
+		id: "dns",
+		port: 53,
+		name: "DNS",
+		icon: "glyph:network",
+		group: "network",
+		keywords: ["53", "nombres"]
+	},
+	{
+		id: "ntp",
+		port: 123,
+		name: "NTP",
+		icon: "glyph:network",
+		group: "network",
+		keywords: [
+			"123",
+			"hora",
+			"time"
+		]
+	},
+	{
+		id: "dhcp",
+		port: 67,
+		name: "DHCP",
+		icon: "glyph:network",
+		group: "network",
+		keywords: ["67", "68"]
+	},
+	{
+		id: "rdp",
+		port: 3389,
+		name: "RDP",
+		icon: "glyph:server",
+		group: "network",
+		keywords: ["3389", "escritorio remoto"]
+	},
+	{
+		id: "icmp",
+		name: "ICMP",
+		icon: "glyph:network",
+		group: "network",
+		keywords: ["ping"]
+	},
+	{
+		id: "snmp",
+		port: 161,
+		name: "SNMP",
+		icon: "glyph:network",
+		group: "network",
+		keywords: ["161", "monitoreo"]
+	},
+	{
+		id: "syslog",
+		port: 514,
+		name: "Syslog",
+		icon: "glyph:file",
+		group: "network",
+		keywords: ["514", "logs"]
+	},
+	{
+		id: "vpn",
+		name: "VPN/IPsec",
+		icon: "glyph:network",
+		group: "network"
+	},
+	{
+		id: "bgp",
+		port: 179,
+		name: "BGP",
+		icon: "glyph:network",
+		group: "network",
+		keywords: [
+			"ebgp",
+			"ibgp",
+			"ruteo"
+		]
+	},
+	{
+		id: "tds",
+		port: 1433,
+		name: "TDS (SQL Server)",
+		icon: "glyph:database",
+		group: "data",
+		fits: { engines: ["sqlserver"] },
+		keywords: [
+			"sql server",
+			"mssql",
+			"1433"
+		]
+	}
+];
+/** Qué grupos de protocolos son naturales según el tipo de destino (de más a menos). */
+const GROUP_AFFINITY = {
+	store: [
+		"data",
+		"network",
+		"files",
+		"web",
+		"identity",
+		"email",
+		"messaging"
+	],
+	bus: [
+		"messaging",
+		"web",
+		"network",
+		"identity",
+		"data",
+		"files",
+		"email"
+	],
+	system: [
+		"web",
+		"messaging",
+		"identity",
+		"files",
+		"email",
+		"data",
+		"network"
+	],
+	container: [
+		"web",
+		"messaging",
+		"identity",
+		"files",
+		"data",
+		"email",
+		"network"
+	],
+	component: [
+		"web",
+		"messaging",
+		"data",
+		"identity",
+		"files",
+		"email",
+		"network"
+	],
+	actor: [
+		"web",
+		"email",
+		"identity",
+		"messaging",
+		"files",
+		"data",
+		"network"
+	],
+	group: [
+		"network",
+		"web",
+		"messaging",
+		"data",
+		"files",
+		"identity",
+		"email"
+	],
+	node: [
+		"network",
+		"web",
+		"data",
+		"messaging",
+		"identity",
+		"files",
+		"email"
+	],
+	infra: [
+		"network",
+		"web",
+		"identity",
+		"data",
+		"messaging",
+		"files",
+		"email"
+	],
+	instance: [
+		"web",
+		"messaging",
+		"data",
+		"identity",
+		"files",
+		"network",
+		"email"
+	]
+};
+/**
+* Protocolos que tienen sentido hacia un destino, del más al menos natural: primero los que
+* encajan con su motor/broker/tipo (JDBC hacia PostgreSQL, Kafka hacia un bus Kafka) y después
+* por afinidad del grupo con el tipo de elemento.
+*/
+function suggestProtocols(target, query = "", limit = 10) {
+	const q = query.trim().toLowerCase();
+	const base = q ? searchCatalog(PROTOCOLS, q, PROTOCOLS.length) : [...PROTOCOLS];
+	if (!target) return base.slice(0, limit);
+	const engine = target.kind === "store" ? findEngine(target.store.engine) : void 0;
+	const broker = target.kind === "bus" ? findBroker(target.bus.broker) : void 0;
+	const affinity = GROUP_AFFINITY[target.kind];
+	const fit = (p) => {
+		const f = p.fits;
+		let s = 0;
+		if (broker?.protocol === p.id) s += 10;
+		if (f?.brokers && target.kind === "bus" && f.brokers.includes(target.bus.broker)) s += 6;
+		if (f?.engines && target.kind === "store" && f.engines.includes(target.store.engine)) s += 8;
+		const storeType = target.kind === "store" ? target.store.type ?? engine?.type : void 0;
+		if (f?.storeTypes && storeType && f.storeTypes.includes(storeType)) s += 5;
+		if (f?.containerTypes && target.kind === "container" && target.containerType && f.containerTypes.includes(target.containerType)) s += 4;
+		if (f?.kinds?.includes(target.kind)) s += 2;
+		return s;
+	};
+	return base.map((p, i) => ({
+		p,
+		fit: fit(p),
+		group: affinity.indexOf(p.group),
+		i
+	})).sort((a, b) => b.fit - a.fit || a.group - b.group || a.i - b.i).slice(0, limit).map((x) => x.p);
+}
+[...[
+	{
+		id: "aws",
+		name: "AWS",
+		icon: "amazonwebservices",
+		keywords: ["amazon"]
+	},
+	{
+		id: "gcp",
+		name: "Google Cloud",
+		icon: "googlecloud",
+		keywords: ["gcp"]
+	},
+	{
+		id: "azure",
+		name: "Azure",
+		icon: "microsoftazure"
+	},
+	{
+		id: "onprem",
+		name: "On-premise",
+		icon: "glyph:server",
+		keywords: ["datacenter", "dc"]
+	},
+	{
+		id: "network",
+		name: "Red",
+		icon: "glyph:network",
+		keywords: [
+			"vpc",
+			"subnet",
+			"vnet"
+		]
+	},
+	{
+		id: "platform",
+		name: "Plataforma",
+		icon: "glyph:layers",
+		keywords: ["k8s", "cluster"]
+	},
+	{
+		id: "other",
+		name: "Otro",
+		icon: "glyph:group"
+	}
+].filter((p) => p.id !== "network" && p.id !== "platform" && p.id !== "other")];
+const NODE_TYPE_LABEL = {
+	datacenter: "Datacenter",
+	cloud: "Nube / cuenta",
+	region: "Región",
+	zone: "Zona de disponibilidad",
+	network: "Red / VPC",
+	subnet: "Subred",
+	cluster: "Clúster",
+	namespace: "Namespace / proyecto",
+	server: "Servidor",
+	vm: "Máquina virtual",
+	runtime: "Runtime / servidor de aplicaciones",
+	device: "Dispositivo",
+	other: "Nodo"
+};
+const INFRA_TYPE_LABEL = {
+	firewall: "Firewall",
+	"load-balancer": "Balanceador de carga",
+	dns: "DNS",
+	gateway: "API gateway",
+	ingress: "Ingress",
+	egress: "Egress",
+	nat: "NAT",
+	vpn: "VPN",
+	link: "Enlace dedicado",
+	"security-group": "Security group",
+	waf: "WAF",
+	cdn: "CDN",
+	proxy: "Proxy",
+	router: "Router",
+	other: "Infraestructura"
+};
+const techById = new Map(TECHNOLOGIES.map((t) => [t.id, t]));
+const engineById = new Map(DB_ENGINES.map((e) => [e.id, e]));
+const brokerById = new Map(MESSAGE_BROKERS.map((b) => [b.id, b]));
+const protocolById = new Map(PROTOCOLS.map((p) => [p.id, p]));
+function findTechnology(id) {
+	return techById.get(id.toLowerCase());
+}
+function findEngine(id) {
+	return engineById.get(id);
+}
+function findBroker(id) {
+	return brokerById.get(id);
+}
+function findProtocol(id) {
+	return protocolById.get(id.toLowerCase());
+}
+/** IDs de los protocolos de una relación, sin sus puertos. */
+function protocolIds(rel) {
+	return (rel.protocols ?? []).map((p) => typeof p === "string" ? p : p.id);
+}
+/**
+* Protocolos de una relación, cada uno con sus puertos. Los puertos sueltos (`ports`) se asignan
+* cuando no hay duda: si la relación tiene un solo protocolo son suyos y, si tiene varios, cada
+* puerto va con el protocolo que lo usa habitualmente (53 con DNS, 123 con NTP). Lo que no se
+* puede asignar queda al final, sin protocolo.
+*/
+function relationChannels(rel) {
+	const entries = rel.protocols ?? [];
+	const channels = entries.map((p) => typeof p === "string" ? {
+		id: p,
+		ports: []
+	} : {
+		id: p.id,
+		ports: [...p.ports]
+	});
+	const plain = channels.filter((_, i) => typeof entries[i] === "string");
+	let loose = [...new Set(rel.ports ?? [])];
+	if (channels.length === 1 && plain.length === 1) {
+		plain[0].ports = loose;
+		loose = [];
+	} else loose = loose.filter((port) => {
+		const owner = plain.find((c) => findProtocol(c.id)?.port === port && !c.ports.includes(port));
+		owner?.ports.push(port);
+		return !owner;
+	});
+	if (loose.length) channels.push({ ports: loose });
+	return channels;
+}
+/** Todos los puertos de destino de una relación, de cualquier protocolo. */
+function relationPorts(rel) {
+	return [...new Set(relationChannels(rel).flatMap((c) => c.ports))];
+}
+function channelText(c) {
+	return [c.id ? findProtocol(c.id)?.name ?? c.id : "", c.ports.map((p) => `:${p}`).join(", ")].filter(Boolean).join(" ");
+}
+/**
+* Protocolos y puertos de una relación, un renglón por cada protocolo con puertos ("DNS :53",
+* "LDAP :389, :636"); los que no tienen puerto van juntos en el primero ("REST/JSON, HTTPS").
+*/
+function relationTechLines(rel) {
+	const channels = relationChannels(rel);
+	const bare = channels.filter((c) => c.id && !c.ports.length).map(channelText);
+	return [...bare.length ? [bare.join(", ")] : [], ...channels.filter((c) => c.ports.length).map(channelText)];
+}
+/** Lo mismo en una línea: "HTTPS :443, :80", "DNS :53 · NTP :123", ":1433". */
+function relationTechnology(rel) {
+	return relationTechLines(rel).join(" · ");
+}
+/**
+* Lo que una relación bidireccional lleva en el sentido contrario (de `to` hacia `from`), si declara
+* algo: su etiqueta y sus protocolos, con los puertos por los que escucha `from`. Una relación de un
+* solo sentido no tiene vuelta, aunque el archivo traiga el bloque.
+*/
+function relationBack(rel) {
+	const back = rel.direction === "bidirectional" ? rel.back : void 0;
+	return back && (back.label || back.protocols?.length || back.ports?.length) ? back : void 0;
+}
+/**
+* La vuelta de una relación con un cambio aplicado (`null` en un campo lo quita). Devuelve `null`
+* cuando no queda nada que declarar: así el bloque desaparece del archivo.
+*/
+function relationBackWith(back, patch) {
+	const next = { ...back };
+	if (patch.label !== void 0) {
+		if (patch.label) next.label = patch.label;
+		else delete next.label;
+	}
+	if (patch.protocols !== void 0) {
+		if (patch.protocols?.length) next.protocols = [...patch.protocols];
+		else delete next.protocols;
+	}
+	if (patch.ports !== void 0) {
+		if (patch.ports?.length) next.ports = [...patch.ports];
+		else delete next.ports;
+	}
+	return Object.keys(next).length ? next : null;
+}
+/** Protocolos de los dos sentidos en una línea, para exportar: "LDAP :389 · ← SMB :445". */
+function relationTechnologyBothWays(rel) {
+	const back = relationBack(rel);
+	const returning = back ? relationTechnology(back) : "";
+	return [relationTechnology(rel), returning ? `← ${returning}` : ""].filter(Boolean).join(" · ");
+}
+/** IDs de los protocolos y puertos de una relación contando los dos sentidos (para los chequeos). */
+function relationUsage(rel) {
+	const back = relationBack(rel);
+	return {
+		protocols: [...new Set([...protocolIds(rel), ...back ? protocolIds(back) : []])],
+		ports: [...new Set([...relationPorts(rel), ...back ? relationPorts(back) : []])]
+	};
+}
+/** Búsqueda simple por prefijo/substring en nombre, id y keywords. */
+function searchCatalog(items, query, limit = 12) {
+	const q = query.trim().toLowerCase();
+	if (!q) return items.slice(0, limit);
+	const scored = [];
+	for (const item of items) {
+		const name = item.name.toLowerCase();
+		const hay = [
+			name,
+			item.id,
+			...item.keywords ?? []
+		];
+		let score = -1;
+		for (const h of hay) {
+			const own = h === name ? .5 : 0;
+			if (h === q) score = Math.max(score, 3 + own);
+			else if (h.startsWith(q)) score = Math.max(score, 2 + own);
+			else if (h.includes(q)) score = Math.max(score, 1 + own);
+		}
+		if (score >= 0) scored.push({
+			item,
+			score
+		});
+	}
+	return scored.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name)).slice(0, limit).map((s) => s.item);
 }
 //#endregion
 //#region packages/core/src/ops/commands.ts
@@ -7776,1498 +9648,6 @@ function summarizeChange(change) {
 	return `${VERB[change.kind]} ${entityLabel(change).toLowerCase()} ${change.name}${fields}`;
 }
 //#endregion
-//#region packages/core/src/catalog/index.ts
-const DB_ENGINES = [
-	{
-		id: "postgresql",
-		name: "PostgreSQL",
-		icon: "postgresql",
-		type: "relational",
-		keywords: ["postgres", "pg"]
-	},
-	{
-		id: "mysql",
-		name: "MySQL",
-		icon: "mysql",
-		type: "relational"
-	},
-	{
-		id: "mariadb",
-		name: "MariaDB",
-		icon: "mariadb",
-		type: "relational"
-	},
-	{
-		id: "sqlserver",
-		name: "SQL Server",
-		icon: "microsoftsqlserver",
-		type: "relational",
-		keywords: ["mssql"]
-	},
-	{
-		id: "oracle",
-		name: "Oracle Database",
-		icon: "oracle",
-		type: "relational"
-	},
-	{
-		id: "db2",
-		name: "IBM Db2",
-		icon: "ibm",
-		type: "relational"
-	},
-	{
-		id: "sqlite",
-		name: "SQLite",
-		icon: "sqlite",
-		type: "relational"
-	},
-	{
-		id: "aurora",
-		name: "Amazon Aurora",
-		icon: "amazonrds",
-		type: "relational",
-		keywords: ["rds", "aws"]
-	},
-	{
-		id: "cloudsql",
-		name: "Cloud SQL",
-		icon: "googlecloud",
-		type: "relational",
-		keywords: ["gcp"]
-	},
-	{
-		id: "cockroachdb",
-		name: "CockroachDB",
-		icon: "cockroachlabs",
-		type: "relational"
-	},
-	{
-		id: "mongodb",
-		name: "MongoDB",
-		icon: "mongodb",
-		type: "document",
-		keywords: ["mongo"]
-	},
-	{
-		id: "couchbase",
-		name: "Couchbase",
-		icon: "couchbase",
-		type: "document"
-	},
-	{
-		id: "firestore",
-		name: "Firestore",
-		icon: "firebase",
-		type: "document",
-		keywords: ["firebase"]
-	},
-	{
-		id: "cosmosdb",
-		name: "Cosmos DB",
-		icon: "azurecosmosdb",
-		type: "document",
-		keywords: ["azure"]
-	},
-	{
-		id: "dynamodb",
-		name: "DynamoDB",
-		icon: "amazondynamodb",
-		type: "key-value",
-		keywords: ["aws", "dynamo"]
-	},
-	{
-		id: "cassandra",
-		name: "Cassandra",
-		icon: "apachecassandra",
-		type: "key-value"
-	},
-	{
-		id: "redis",
-		name: "Redis",
-		icon: "redis",
-		type: "cache"
-	},
-	{
-		id: "memcached",
-		name: "Memcached",
-		icon: "memcached",
-		type: "cache"
-	},
-	{
-		id: "elasticsearch",
-		name: "Elasticsearch",
-		icon: "elasticsearch",
-		type: "search",
-		keywords: ["elastic"]
-	},
-	{
-		id: "opensearch",
-		name: "OpenSearch",
-		icon: "opensearch",
-		type: "search"
-	},
-	{
-		id: "s3",
-		name: "Amazon S3",
-		icon: "amazons3",
-		type: "object",
-		keywords: ["aws", "bucket"]
-	},
-	{
-		id: "gcs",
-		name: "Cloud Storage",
-		icon: "googlecloudstorage",
-		type: "object",
-		keywords: ["gcp", "bucket"]
-	},
-	{
-		id: "blob",
-		name: "Azure Blob Storage",
-		icon: "microsoftazure",
-		type: "object",
-		keywords: ["azure"]
-	},
-	{
-		id: "neo4j",
-		name: "Neo4j",
-		icon: "neo4j",
-		type: "graph"
-	},
-	{
-		id: "influxdb",
-		name: "InfluxDB",
-		icon: "influxdb",
-		type: "time-series"
-	},
-	{
-		id: "timescaledb",
-		name: "TimescaleDB",
-		icon: "timescale",
-		type: "time-series"
-	},
-	{
-		id: "snowflake",
-		name: "Snowflake",
-		icon: "snowflake",
-		type: "warehouse"
-	},
-	{
-		id: "bigquery",
-		name: "BigQuery",
-		icon: "googlebigquery",
-		type: "warehouse",
-		keywords: ["gcp"]
-	},
-	{
-		id: "redshift",
-		name: "Amazon Redshift",
-		icon: "amazonredshift",
-		type: "warehouse",
-		keywords: ["aws"]
-	},
-	{
-		id: "clickhouse",
-		name: "ClickHouse",
-		icon: "clickhouse",
-		type: "warehouse"
-	}
-];
-const MESSAGE_BROKERS = [
-	{
-		id: "kafka",
-		name: "Apache Kafka",
-		icon: "apachekafka",
-		type: "stream",
-		protocol: "kafka",
-		keywords: ["confluent", "msk"]
-	},
-	{
-		id: "rabbitmq",
-		name: "RabbitMQ",
-		icon: "rabbitmq",
-		type: "queue",
-		protocol: "amqp"
-	},
-	{
-		id: "activemq",
-		name: "ActiveMQ",
-		icon: "apacheactivemq",
-		type: "queue",
-		protocol: "jms",
-		keywords: ["artemis"]
-	},
-	{
-		id: "pulsar",
-		name: "Apache Pulsar",
-		icon: "apachepulsar",
-		type: "stream",
-		protocol: "pulsar"
-	},
-	{
-		id: "nats",
-		name: "NATS",
-		icon: "natsdotio",
-		type: "topic",
-		protocol: "nats",
-		keywords: ["jetstream"]
-	},
-	{
-		id: "redis-streams",
-		name: "Redis Streams",
-		icon: "redis",
-		type: "stream",
-		protocol: "resp"
-	},
-	{
-		id: "mosquitto",
-		name: "MQTT (Mosquitto)",
-		icon: "eclipsemosquitto",
-		type: "topic",
-		protocol: "mqtt",
-		keywords: ["iot"]
-	},
-	{
-		id: "ibm-mq",
-		name: "IBM MQ",
-		icon: "ibm",
-		type: "queue",
-		protocol: "jms",
-		keywords: ["websphere"]
-	},
-	{
-		id: "sqs",
-		name: "Amazon SQS",
-		icon: "amazonsqs",
-		type: "queue",
-		protocol: "https",
-		keywords: ["aws"]
-	},
-	{
-		id: "sns",
-		name: "Amazon SNS",
-		icon: "amazonsns",
-		type: "topic",
-		protocol: "https",
-		keywords: ["aws"]
-	},
-	{
-		id: "eventbridge",
-		name: "Amazon EventBridge",
-		icon: "amazoneventbridge",
-		type: "event-bus",
-		protocol: "https",
-		keywords: ["aws"]
-	},
-	{
-		id: "kinesis",
-		name: "Amazon Kinesis",
-		icon: "amazonkinesis",
-		type: "stream",
-		protocol: "https",
-		keywords: ["aws"]
-	},
-	{
-		id: "pubsub",
-		name: "Google Pub/Sub",
-		icon: "googlepubsub",
-		type: "topic",
-		protocol: "grpc",
-		keywords: ["gcp"]
-	},
-	{
-		id: "service-bus",
-		name: "Azure Service Bus",
-		icon: "azureservicebus",
-		type: "queue",
-		protocol: "amqp",
-		keywords: ["azure"]
-	},
-	{
-		id: "event-hubs",
-		name: "Azure Event Hubs",
-		icon: "azureeventhubs",
-		type: "stream",
-		protocol: "kafka",
-		keywords: ["azure"]
-	}
-];
-const TECHNOLOGIES = [
-	{
-		id: "java",
-		name: "Java",
-		icon: "openjdk",
-		category: "language"
-	},
-	{
-		id: "kotlin",
-		name: "Kotlin",
-		icon: "kotlin",
-		category: "language"
-	},
-	{
-		id: "typescript",
-		name: "TypeScript",
-		icon: "typescript",
-		category: "language",
-		keywords: ["ts"]
-	},
-	{
-		id: "javascript",
-		name: "JavaScript",
-		icon: "javascript",
-		category: "language",
-		keywords: ["js"]
-	},
-	{
-		id: "python",
-		name: "Python",
-		icon: "python",
-		category: "language"
-	},
-	{
-		id: "go",
-		name: "Go",
-		icon: "go",
-		category: "language",
-		keywords: ["golang"]
-	},
-	{
-		id: "dotnet",
-		name: ".NET",
-		icon: "dotnet",
-		category: "language",
-		keywords: ["csharp", "c#"]
-	},
-	{
-		id: "php",
-		name: "PHP",
-		icon: "php",
-		category: "language"
-	},
-	{
-		id: "ruby",
-		name: "Ruby",
-		icon: "ruby",
-		category: "language"
-	},
-	{
-		id: "rust",
-		name: "Rust",
-		icon: "rust",
-		category: "language"
-	},
-	{
-		id: "scala",
-		name: "Scala",
-		icon: "scala",
-		category: "language"
-	},
-	{
-		id: "swift",
-		name: "Swift",
-		icon: "swift",
-		category: "language"
-	},
-	{
-		id: "dart",
-		name: "Dart",
-		icon: "dart",
-		category: "language"
-	},
-	{
-		id: "elixir",
-		name: "Elixir",
-		icon: "elixir",
-		category: "language"
-	},
-	{
-		id: "spring-boot",
-		name: "Spring Boot",
-		icon: "springboot",
-		category: "backend",
-		keywords: ["spring"]
-	},
-	{
-		id: "quarkus",
-		name: "Quarkus",
-		icon: "quarkus",
-		category: "backend"
-	},
-	{
-		id: "nodejs",
-		name: "Node.js",
-		icon: "nodedotjs",
-		category: "backend",
-		keywords: ["node"]
-	},
-	{
-		id: "nestjs",
-		name: "NestJS",
-		icon: "nestjs",
-		category: "backend"
-	},
-	{
-		id: "express",
-		name: "Express",
-		icon: "express",
-		category: "backend"
-	},
-	{
-		id: "fastapi",
-		name: "FastAPI",
-		icon: "fastapi",
-		category: "backend"
-	},
-	{
-		id: "django",
-		name: "Django",
-		icon: "django",
-		category: "backend"
-	},
-	{
-		id: "flask",
-		name: "Flask",
-		icon: "flask",
-		category: "backend"
-	},
-	{
-		id: "laravel",
-		name: "Laravel",
-		icon: "laravel",
-		category: "backend"
-	},
-	{
-		id: "rails",
-		name: "Ruby on Rails",
-		icon: "rubyonrails",
-		category: "backend"
-	},
-	{
-		id: "react",
-		name: "React",
-		icon: "react",
-		category: "frontend"
-	},
-	{
-		id: "nextjs",
-		name: "Next.js",
-		icon: "nextdotjs",
-		category: "frontend"
-	},
-	{
-		id: "angular",
-		name: "Angular",
-		icon: "angular",
-		category: "frontend"
-	},
-	{
-		id: "vue",
-		name: "Vue",
-		icon: "vuedotjs",
-		category: "frontend"
-	},
-	{
-		id: "svelte",
-		name: "Svelte",
-		icon: "svelte",
-		category: "frontend"
-	},
-	{
-		id: "flutter",
-		name: "Flutter",
-		icon: "flutter",
-		category: "mobile"
-	},
-	{
-		id: "react-native",
-		name: "React Native",
-		icon: "react",
-		category: "mobile"
-	},
-	{
-		id: "android",
-		name: "Android",
-		icon: "android",
-		category: "mobile"
-	},
-	{
-		id: "ios",
-		name: "iOS",
-		icon: "apple",
-		category: "mobile"
-	},
-	{
-		id: "docker",
-		name: "Docker",
-		icon: "docker",
-		category: "platform"
-	},
-	{
-		id: "kubernetes",
-		name: "Kubernetes",
-		icon: "kubernetes",
-		category: "platform",
-		keywords: ["k8s"]
-	},
-	{
-		id: "nginx",
-		name: "NGINX",
-		icon: "nginx",
-		category: "platform"
-	},
-	{
-		id: "apache",
-		name: "Apache HTTP",
-		icon: "apache",
-		category: "platform"
-	},
-	{
-		id: "kong",
-		name: "Kong",
-		icon: "kong",
-		category: "platform",
-		keywords: ["gateway"]
-	},
-	{
-		id: "istio",
-		name: "Istio",
-		icon: "istio",
-		category: "platform"
-	},
-	{
-		id: "terraform",
-		name: "Terraform",
-		icon: "terraform",
-		category: "platform"
-	},
-	{
-		id: "aws-lambda",
-		name: "AWS Lambda",
-		icon: "awslambda",
-		category: "platform",
-		keywords: ["lambda", "serverless"]
-	},
-	{
-		id: "cloud-run",
-		name: "Cloud Run",
-		icon: "googlecloud",
-		category: "platform"
-	},
-	{
-		id: "cloud-functions",
-		name: "Cloud Functions",
-		icon: "googlecloud",
-		category: "platform"
-	},
-	{
-		id: "azure-functions",
-		name: "Azure Functions",
-		icon: "azurefunctions",
-		category: "platform"
-	},
-	{
-		id: "openshift",
-		name: "OpenShift",
-		icon: "redhatopenshift",
-		category: "platform",
-		keywords: [
-			"ocp",
-			"red hat",
-			"k8s"
-		]
-	},
-	{
-		id: "rosa",
-		name: "Red Hat OpenShift on AWS",
-		icon: "redhatopenshift",
-		category: "platform",
-		keywords: [
-			"rosa",
-			"ocp",
-			"aws"
-		]
-	},
-	{
-		id: "vmware",
-		name: "VMware vSphere",
-		icon: "vmware",
-		category: "platform",
-		keywords: ["esxi", "vm"]
-	},
-	{
-		id: "linux",
-		name: "Linux",
-		icon: "linux",
-		category: "platform",
-		keywords: ["rhel", "ubuntu"]
-	},
-	{
-		id: "windows-server",
-		name: "Windows Server",
-		icon: "glyph:server",
-		category: "platform",
-		keywords: ["windows", "iis"]
-	},
-	{
-		id: "aws-ec2",
-		name: "Amazon EC2",
-		icon: "glyph:server",
-		category: "infrastructure",
-		keywords: [
-			"aws",
-			"instancia",
-			"vm"
-		]
-	},
-	{
-		id: "aws-vpc",
-		name: "Amazon VPC",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: ["aws", "red"]
-	},
-	{
-		id: "aws-alb",
-		name: "AWS Application Load Balancer",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: [
-			"alb",
-			"elb",
-			"load balancer",
-			"balanceador"
-		]
-	},
-	{
-		id: "aws-nlb",
-		name: "AWS Network Load Balancer",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: [
-			"nlb",
-			"elb",
-			"load balancer",
-			"balanceador"
-		]
-	},
-	{
-		id: "route53",
-		name: "Amazon Route 53",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: [
-			"route 53",
-			"dns",
-			"aws"
-		]
-	},
-	{
-		id: "aws-direct-connect",
-		name: "AWS Direct Connect",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: [
-			"direct connect",
-			"dx",
-			"enlace",
-			"aws"
-		]
-	},
-	{
-		id: "aws-security-group",
-		name: "AWS Security Group",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: [
-			"security group",
-			"sg",
-			"aws"
-		]
-	},
-	{
-		id: "aws-nat-gateway",
-		name: "AWS NAT Gateway",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: [
-			"nat",
-			"egress",
-			"aws"
-		]
-	},
-	{
-		id: "aws-api-gateway",
-		name: "Amazon API Gateway",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: ["api gateway", "aws"]
-	},
-	{
-		id: "cloudfront",
-		name: "Amazon CloudFront",
-		icon: "glyph:globe",
-		category: "infrastructure",
-		keywords: ["cdn", "aws"]
-	},
-	{
-		id: "aws-waf",
-		name: "AWS WAF",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: ["waf", "aws"]
-	},
-	{
-		id: "azure-front-door",
-		name: "Azure Front Door",
-		icon: "glyph:globe",
-		category: "infrastructure",
-		keywords: [
-			"cdn",
-			"waf",
-			"azure"
-		]
-	},
-	{
-		id: "azure-apim",
-		name: "Azure API Management",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: [
-			"apim",
-			"api manager",
-			"azure"
-		]
-	},
-	{
-		id: "fortigate",
-		name: "FortiGate",
-		icon: "fortinet",
-		category: "infrastructure",
-		keywords: [
-			"fortinet",
-			"firewall",
-			"fg"
-		]
-	},
-	{
-		id: "palo-alto",
-		name: "Palo Alto NGFW",
-		icon: "paloaltonetworks",
-		category: "infrastructure",
-		keywords: ["firewall"]
-	},
-	{
-		id: "cisco",
-		name: "Cisco",
-		icon: "cisco",
-		category: "infrastructure",
-		keywords: [
-			"router",
-			"switch",
-			"asa"
-		]
-	},
-	{
-		id: "f5",
-		name: "F5 BIG-IP",
-		icon: "f5",
-		category: "infrastructure",
-		keywords: [
-			"load balancer",
-			"balanceador",
-			"waf"
-		]
-	},
-	{
-		id: "haproxy",
-		name: "HAProxy",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: ["load balancer", "balanceador"]
-	},
-	{
-		id: "traefik",
-		name: "Traefik",
-		icon: "traefikproxy",
-		category: "infrastructure",
-		keywords: ["ingress", "proxy"]
-	},
-	{
-		id: "envoy",
-		name: "Envoy",
-		icon: "envoyproxy",
-		category: "infrastructure",
-		keywords: ["proxy", "mesh"]
-	},
-	{
-		id: "cloudflare",
-		name: "Cloudflare",
-		icon: "cloudflare",
-		category: "infrastructure",
-		keywords: [
-			"cdn",
-			"dns",
-			"waf"
-		]
-	},
-	{
-		id: "apim",
-		name: "API Manager",
-		icon: "glyph:network",
-		category: "infrastructure",
-		keywords: [
-			"apim",
-			"gateway",
-			"api gateway"
-		]
-	},
-	{
-		id: "entra-id",
-		name: "Microsoft Entra ID",
-		icon: "glyph:plug",
-		category: "saas",
-		keywords: [
-			"azure ad",
-			"aad",
-			"sso",
-			"microsoft"
-		]
-	},
-	{
-		id: "keycloak",
-		name: "Keycloak",
-		icon: "keycloak",
-		category: "saas",
-		keywords: ["iam", "sso"]
-	},
-	{
-		id: "auth0",
-		name: "Auth0",
-		icon: "auth0",
-		category: "saas"
-	},
-	{
-		id: "okta",
-		name: "Okta",
-		icon: "okta",
-		category: "saas"
-	},
-	{
-		id: "salesforce",
-		name: "Salesforce",
-		icon: "salesforce",
-		category: "saas"
-	},
-	{
-		id: "sap",
-		name: "SAP",
-		icon: "sap",
-		category: "saas"
-	}
-];
-/** Tipos de elemento que llevan el campo `technology`. */
-const KINDS_WITH_TECHNOLOGY = [
-	"system",
-	"container",
-	"component",
-	"node",
-	"infra"
-];
-const API_TARGETS = {
-	kinds: [
-		"system",
-		"container",
-		"component"
-	],
-	containerTypes: [
-		"web",
-		"api",
-		"service",
-		"function"
-	]
-};
-/** Ordenados por grupo y, dentro de cada grupo, de más a menos habitual. */
-const PROTOCOLS = [
-	{
-		id: "https",
-		name: "HTTPS",
-		icon: "glyph:globe",
-		group: "web",
-		fits: API_TARGETS,
-		keywords: ["http", "tls"]
-	},
-	{
-		id: "rest",
-		name: "REST/JSON",
-		icon: "glyph:globe",
-		group: "web",
-		fits: API_TARGETS,
-		keywords: ["json", "http"]
-	},
-	{
-		id: "grpc",
-		name: "gRPC",
-		icon: "glyph:plug",
-		group: "web",
-		fits: { containerTypes: ["api", "service"] },
-		keywords: ["protobuf"]
-	},
-	{
-		id: "graphql",
-		name: "GraphQL",
-		icon: "graphql",
-		group: "web",
-		fits: { containerTypes: ["api", "web"] }
-	},
-	{
-		id: "websocket",
-		name: "WebSocket",
-		icon: "glyph:plug",
-		group: "web",
-		keywords: ["ws", "tiempo real"]
-	},
-	{
-		id: "sse",
-		name: "Server-Sent Events",
-		icon: "glyph:plug",
-		group: "web",
-		keywords: ["sse", "stream"]
-	},
-	{
-		id: "soap",
-		name: "SOAP/XML",
-		icon: "glyph:file",
-		group: "web",
-		keywords: ["xml", "wsdl"]
-	},
-	{
-		id: "webhook",
-		name: "Webhook",
-		icon: "glyph:plug",
-		group: "web",
-		keywords: ["callback"]
-	},
-	{
-		id: "http",
-		name: "HTTP (sin TLS)",
-		icon: "glyph:globe",
-		group: "web"
-	},
-	{
-		id: "kafka",
-		name: "Kafka",
-		icon: "apachekafka",
-		group: "messaging",
-		fits: { brokers: ["kafka", "event-hubs"] }
-	},
-	{
-		id: "amqp",
-		name: "AMQP",
-		icon: "rabbitmq",
-		group: "messaging",
-		fits: { brokers: [
-			"rabbitmq",
-			"service-bus",
-			"activemq"
-		] }
-	},
-	{
-		id: "jms",
-		name: "JMS",
-		icon: "glyph:queue",
-		group: "messaging",
-		fits: { brokers: ["activemq", "ibm-mq"] }
-	},
-	{
-		id: "mqtt",
-		name: "MQTT",
-		icon: "glyph:queue",
-		group: "messaging",
-		fits: { brokers: ["mosquitto"] },
-		keywords: ["iot"]
-	},
-	{
-		id: "nats",
-		name: "NATS",
-		icon: "natsdotio",
-		group: "messaging",
-		fits: { brokers: ["nats"] }
-	},
-	{
-		id: "pulsar",
-		name: "Pulsar",
-		icon: "apachepulsar",
-		group: "messaging",
-		fits: { brokers: ["pulsar"] }
-	},
-	{
-		id: "stomp",
-		name: "STOMP",
-		icon: "glyph:queue",
-		group: "messaging",
-		fits: { brokers: ["activemq", "rabbitmq"] }
-	},
-	{
-		id: "jdbc",
-		name: "JDBC",
-		icon: "glyph:database",
-		group: "data",
-		fits: { storeTypes: [
-			"relational",
-			"warehouse",
-			"time-series"
-		] }
-	},
-	{
-		id: "sql",
-		name: "SQL (driver nativo)",
-		icon: "glyph:database",
-		group: "data",
-		fits: { storeTypes: [
-			"relational",
-			"warehouse",
-			"time-series"
-		] },
-		keywords: [
-			"tcp",
-			"postgres",
-			"mysql"
-		]
-	},
-	{
-		id: "odbc",
-		name: "ODBC",
-		icon: "glyph:database",
-		group: "data",
-		fits: { storeTypes: ["relational", "warehouse"] }
-	},
-	{
-		id: "mongodb-wire",
-		name: "MongoDB Wire",
-		icon: "mongodb",
-		group: "data",
-		fits: { engines: ["mongodb", "cosmosdb"] }
-	},
-	{
-		id: "resp",
-		name: "Redis (RESP)",
-		icon: "redis",
-		group: "data",
-		fits: { engines: ["redis"] }
-	},
-	{
-		id: "memcached",
-		name: "Memcached",
-		icon: "memcached",
-		group: "data",
-		fits: { engines: ["memcached"] }
-	},
-	{
-		id: "cql",
-		name: "CQL",
-		icon: "apachecassandra",
-		group: "data",
-		fits: { engines: ["cassandra"] }
-	},
-	{
-		id: "bolt",
-		name: "Bolt",
-		icon: "neo4j",
-		group: "data",
-		fits: { engines: ["neo4j"] }
-	},
-	{
-		id: "s3-api",
-		name: "S3 API",
-		icon: "amazons3",
-		group: "data",
-		fits: { storeTypes: ["object"] }
-	},
-	{
-		id: "search-api",
-		name: "API de búsqueda",
-		icon: "elasticsearch",
-		group: "data",
-		fits: { storeTypes: ["search"] }
-	},
-	{
-		id: "dynamodb-api",
-		name: "DynamoDB API",
-		icon: "amazondynamodb",
-		group: "data",
-		fits: { engines: ["dynamodb"] }
-	},
-	{
-		id: "sftp",
-		name: "SFTP",
-		icon: "glyph:file",
-		group: "files",
-		keywords: ["ssh"]
-	},
-	{
-		id: "ftps",
-		name: "FTP/FTPS",
-		icon: "glyph:file",
-		group: "files"
-	},
-	{
-		id: "smb",
-		name: "SMB/CIFS",
-		icon: "glyph:file",
-		group: "files"
-	},
-	{
-		id: "nfs",
-		name: "NFS",
-		icon: "glyph:file",
-		group: "files"
-	},
-	{
-		id: "oauth2",
-		name: "OAuth 2.0",
-		icon: "glyph:plug",
-		group: "identity",
-		keywords: ["token"]
-	},
-	{
-		id: "oidc",
-		name: "OpenID Connect",
-		icon: "openid",
-		group: "identity",
-		keywords: ["sso"]
-	},
-	{
-		id: "saml",
-		name: "SAML 2.0",
-		icon: "glyph:plug",
-		group: "identity",
-		keywords: ["sso"]
-	},
-	{
-		id: "ldap",
-		name: "LDAP",
-		icon: "glyph:server",
-		group: "identity",
-		keywords: ["active directory"]
-	},
-	{
-		id: "kerberos",
-		name: "Kerberos",
-		icon: "glyph:server",
-		group: "identity"
-	},
-	{
-		id: "smtp",
-		name: "SMTP",
-		icon: "glyph:mail",
-		group: "email"
-	},
-	{
-		id: "imap",
-		name: "IMAP",
-		icon: "glyph:mail",
-		group: "email"
-	},
-	{
-		id: "tcp",
-		name: "TCP",
-		icon: "glyph:network",
-		group: "network"
-	},
-	{
-		id: "udp",
-		name: "UDP",
-		icon: "glyph:network",
-		group: "network"
-	},
-	{
-		id: "ssh",
-		name: "SSH",
-		icon: "glyph:server",
-		group: "network"
-	},
-	{
-		id: "dns",
-		name: "DNS",
-		icon: "glyph:network",
-		group: "network"
-	},
-	{
-		id: "vpn",
-		name: "VPN/IPsec",
-		icon: "glyph:network",
-		group: "network"
-	},
-	{
-		id: "bgp",
-		name: "BGP",
-		icon: "glyph:network",
-		group: "network",
-		keywords: [
-			"ebgp",
-			"ibgp",
-			"ruteo"
-		]
-	},
-	{
-		id: "tds",
-		name: "TDS (SQL Server)",
-		icon: "glyph:database",
-		group: "data",
-		fits: { engines: ["sqlserver"] },
-		keywords: [
-			"sql server",
-			"mssql",
-			"1433"
-		]
-	}
-];
-/** Qué grupos de protocolos son naturales según el tipo de destino (de más a menos). */
-const GROUP_AFFINITY = {
-	store: [
-		"data",
-		"network",
-		"files",
-		"web",
-		"identity",
-		"email",
-		"messaging"
-	],
-	bus: [
-		"messaging",
-		"web",
-		"network",
-		"identity",
-		"data",
-		"files",
-		"email"
-	],
-	system: [
-		"web",
-		"messaging",
-		"identity",
-		"files",
-		"email",
-		"data",
-		"network"
-	],
-	container: [
-		"web",
-		"messaging",
-		"identity",
-		"files",
-		"data",
-		"email",
-		"network"
-	],
-	component: [
-		"web",
-		"messaging",
-		"data",
-		"identity",
-		"files",
-		"email",
-		"network"
-	],
-	actor: [
-		"web",
-		"email",
-		"identity",
-		"messaging",
-		"files",
-		"data",
-		"network"
-	],
-	group: [
-		"network",
-		"web",
-		"messaging",
-		"data",
-		"files",
-		"identity",
-		"email"
-	],
-	node: [
-		"network",
-		"web",
-		"data",
-		"messaging",
-		"identity",
-		"files",
-		"email"
-	],
-	infra: [
-		"network",
-		"web",
-		"identity",
-		"data",
-		"messaging",
-		"files",
-		"email"
-	],
-	instance: [
-		"web",
-		"messaging",
-		"data",
-		"identity",
-		"files",
-		"network",
-		"email"
-	]
-};
-/**
-* Protocolos que tienen sentido hacia un destino, del más al menos natural: primero los que
-* encajan con su motor/broker/tipo (JDBC hacia PostgreSQL, Kafka hacia un bus Kafka) y después
-* por afinidad del grupo con el tipo de elemento.
-*/
-function suggestProtocols(target, query = "", limit = 10) {
-	const q = query.trim().toLowerCase();
-	const base = q ? searchCatalog(PROTOCOLS, q, PROTOCOLS.length) : [...PROTOCOLS];
-	if (!target) return base.slice(0, limit);
-	const engine = target.kind === "store" ? findEngine(target.store.engine) : void 0;
-	const broker = target.kind === "bus" ? findBroker(target.bus.broker) : void 0;
-	const affinity = GROUP_AFFINITY[target.kind];
-	const fit = (p) => {
-		const f = p.fits;
-		let s = 0;
-		if (broker?.protocol === p.id) s += 10;
-		if (f?.brokers && target.kind === "bus" && f.brokers.includes(target.bus.broker)) s += 6;
-		if (f?.engines && target.kind === "store" && f.engines.includes(target.store.engine)) s += 8;
-		const storeType = target.kind === "store" ? target.store.type ?? engine?.type : void 0;
-		if (f?.storeTypes && storeType && f.storeTypes.includes(storeType)) s += 5;
-		if (f?.containerTypes && target.kind === "container" && target.containerType && f.containerTypes.includes(target.containerType)) s += 4;
-		if (f?.kinds?.includes(target.kind)) s += 2;
-		return s;
-	};
-	return base.map((p, i) => ({
-		p,
-		fit: fit(p),
-		group: affinity.indexOf(p.group),
-		i
-	})).sort((a, b) => b.fit - a.fit || a.group - b.group || a.i - b.i).slice(0, limit).map((x) => x.p);
-}
-[...[
-	{
-		id: "aws",
-		name: "AWS",
-		icon: "amazonwebservices",
-		keywords: ["amazon"]
-	},
-	{
-		id: "gcp",
-		name: "Google Cloud",
-		icon: "googlecloud",
-		keywords: ["gcp"]
-	},
-	{
-		id: "azure",
-		name: "Azure",
-		icon: "microsoftazure"
-	},
-	{
-		id: "onprem",
-		name: "On-premise",
-		icon: "glyph:server",
-		keywords: ["datacenter", "dc"]
-	},
-	{
-		id: "network",
-		name: "Red",
-		icon: "glyph:network",
-		keywords: [
-			"vpc",
-			"subnet",
-			"vnet"
-		]
-	},
-	{
-		id: "platform",
-		name: "Plataforma",
-		icon: "glyph:layers",
-		keywords: ["k8s", "cluster"]
-	},
-	{
-		id: "other",
-		name: "Otro",
-		icon: "glyph:group"
-	}
-].filter((p) => p.id !== "network" && p.id !== "platform" && p.id !== "other")];
-const NODE_TYPE_LABEL = {
-	datacenter: "Datacenter",
-	cloud: "Nube / cuenta",
-	region: "Región",
-	zone: "Zona de disponibilidad",
-	network: "Red / VPC",
-	subnet: "Subred",
-	cluster: "Clúster",
-	namespace: "Namespace / proyecto",
-	server: "Servidor",
-	vm: "Máquina virtual",
-	runtime: "Runtime / servidor de aplicaciones",
-	device: "Dispositivo",
-	other: "Nodo"
-};
-const INFRA_TYPE_LABEL = {
-	firewall: "Firewall",
-	"load-balancer": "Balanceador de carga",
-	dns: "DNS",
-	gateway: "API gateway",
-	ingress: "Ingress",
-	egress: "Egress",
-	nat: "NAT",
-	vpn: "VPN",
-	link: "Enlace dedicado",
-	"security-group": "Security group",
-	waf: "WAF",
-	cdn: "CDN",
-	proxy: "Proxy",
-	router: "Router",
-	other: "Infraestructura"
-};
-const techById = new Map(TECHNOLOGIES.map((t) => [t.id, t]));
-const engineById = new Map(DB_ENGINES.map((e) => [e.id, e]));
-const brokerById = new Map(MESSAGE_BROKERS.map((b) => [b.id, b]));
-const protocolById = new Map(PROTOCOLS.map((p) => [p.id, p]));
-function findTechnology(id) {
-	return techById.get(id.toLowerCase());
-}
-function findEngine(id) {
-	return engineById.get(id);
-}
-function findBroker(id) {
-	return brokerById.get(id);
-}
-function findProtocol(id) {
-	return protocolById.get(id.toLowerCase());
-}
-/** Protocolos y puertos de una relación: "HTTPS :443, :80", "TCP :443", ":1433". */
-function relationTechnology(rel) {
-	return [(rel.protocols ?? []).map((p) => findProtocol(p)?.name ?? p).join(", "), (rel.ports ?? []).map((p) => `:${p}`).join(", ")].filter(Boolean).join(" ");
-}
-/** Búsqueda simple por prefijo/substring en nombre, id y keywords. */
-function searchCatalog(items, query, limit = 12) {
-	const q = query.trim().toLowerCase();
-	if (!q) return items.slice(0, limit);
-	const scored = [];
-	for (const item of items) {
-		const hay = [
-			item.name.toLowerCase(),
-			item.id,
-			...item.keywords ?? []
-		];
-		let score = -1;
-		for (const h of hay) if (h === q) score = Math.max(score, 3);
-		else if (h.startsWith(q)) score = Math.max(score, 2);
-		else if (h.includes(q)) score = Math.max(score, 1);
-		if (score >= 0) scored.push({
-			item,
-			score
-		});
-	}
-	return scored.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name)).slice(0, limit).map((s) => s.item);
-}
-//#endregion
 //#region packages/core/src/layout/index.ts
 /** Tipos que se dibujan como marcos que contienen a otros: grupos y nodos de despliegue. */
 function isFrameKind(kind) {
@@ -9790,13 +10170,35 @@ const DEPLOYMENT_OPTIONS = {
 	"elk.direction": "RIGHT",
 	"elk.spacing.edgeNode": "60"
 };
-/** Texto de la etiqueta de una flecha, igual que en el lienzo: qué hace y, abajo, protocolo y puertos. */
+/** Renglones de protocolo que entran en la etiqueta de una flecha; el resto se resume en "+N más". */
+const MAX_TECH_LINES = 4;
+const clampTech = (all) => all.length > MAX_TECH_LINES ? [...all.slice(0, 3), `+${all.length - MAX_TECH_LINES + 1} más`] : all;
+/**
+* Texto de la etiqueta de una flecha, igual que en el lienzo: qué hace y, abajo, protocolo y
+* puertos: un renglón por cada protocolo con sus puertos (`techLines`; `tech` es lo mismo en uno).
+* Una relación bidireccional que declara su vuelta lleva además `back`: lo que va en el otro
+* sentido, que el lienzo dibuja aparte, cerca de la punta a la que apunta.
+*/
 function edgeLabelParts(edge) {
 	const rel = edge.relations[0];
-	if (!rel) return { tech: "" };
+	if (!rel) return {
+		tech: "",
+		techLines: []
+	};
+	const label = edge.implied ? edge.relations.length > 1 ? `${edge.relations.length} relaciones` : rel.label ?? "Relación implícita" : edge.projected && edge.relations.length > 1 ? `${rel.label ?? "Relación"} +${edge.relations.length - 1}` : rel.label;
+	const all = edge.implied ? [] : relationTechLines(rel);
+	const returning = !edge.implied && edge.relations.length === 1 ? relationBack(rel) : void 0;
+	const backLines = returning ? relationTechLines(returning) : [];
+	const back = returning ? {
+		label: returning.label,
+		tech: backLines.join(" · "),
+		techLines: clampTech(backLines)
+	} : void 0;
 	return {
-		label: edge.implied ? edge.relations.length > 1 ? `${edge.relations.length} relaciones` : rel.label ?? "Relación implícita" : edge.projected && edge.relations.length > 1 ? `${rel.label ?? "Relación"} +${edge.relations.length - 1}` : rel.label,
-		tech: edge.implied ? "" : relationTechnology(rel)
+		label,
+		tech: all.join(" · "),
+		techLines: clampTech(all),
+		...back ? { back } : {}
 	};
 }
 const LABEL_MAX_W = 200;
@@ -9824,24 +10226,57 @@ function wrapText(text, maxChars) {
 		longest: Math.max(longest, current)
 	};
 }
-/** Tamaño aproximado de la etiqueta de una flecha tal como la dibuja el lienzo (null si no tiene). */
-function edgeLabelSize(edge) {
-	const { label, tech } = edgeLabelParts(edge);
-	if (!label && !tech) return null;
-	const inner = 182;
+/** Lo que suma la flechita de sentido delante de la etiqueta de cada lado. */
+const LABEL_ARROW_W = 15;
+/** Separación entre los dos bloques cuando van apilados en una sola etiqueta. */
+const LABEL_STACK_GAP = 5;
+/** Tamaño aproximado de un bloque de etiqueta tal como lo dibuja el lienzo (null si está vacío). */
+function edgeLabelBlockSize(block, arrow = false) {
+	if (!block) return null;
+	const { label, techLines } = block;
+	if (!label && !techLines.length) return null;
+	const inner = 182 - (arrow ? LABEL_ARROW_W : 0);
 	const main = label ? wrapText(label, Math.floor(inner / LABEL_CHAR_W)) : {
 		lines: 0,
 		longest: 0
 	};
-	const sub = tech ? wrapText(`[${tech}]`, Math.floor(inner / TECH_CHAR_W)) : {
+	const sub = {
 		lines: 0,
 		longest: 0
 	};
-	const width = Math.min(LABEL_MAX_W, Math.max(main.longest * LABEL_CHAR_W, sub.longest * TECH_CHAR_W) + LABEL_PAD_W);
+	for (const line of techLines) {
+		const wrapped = wrapText(`[${line}]`, Math.floor(inner / TECH_CHAR_W));
+		sub.lines += wrapped.lines;
+		sub.longest = Math.max(sub.longest, wrapped.longest);
+	}
+	const width = Math.min(LABEL_MAX_W, Math.max(main.longest * LABEL_CHAR_W, sub.longest * TECH_CHAR_W) + LABEL_PAD_W + (arrow ? LABEL_ARROW_W : 0));
 	const height = main.lines * LABEL_LINE_H + sub.lines * TECH_LINE_H + LABEL_PAD_H;
 	return {
 		width: Math.ceil(width),
 		height: Math.ceil(height)
+	};
+}
+/**
+* Tamaño de cada lado de la etiqueta de una flecha con ida y vuelta (`main` y `back`, cada uno con
+* su flechita de sentido), o solo `main` si la flecha lleva una etiqueta sola.
+*/
+function edgeLabelSizes(edge) {
+	const parts = edgeLabelParts(edge);
+	return {
+		main: edgeLabelBlockSize(parts, !!parts.back),
+		back: edgeLabelBlockSize(parts.back, true)
+	};
+}
+/**
+* Tamaño aproximado de la etiqueta de una flecha tal como la dibuja el lienzo (null si no tiene).
+* Con ida y vuelta, es el de los dos bloques apilados: el lugar que hay que reservarle.
+*/
+function edgeLabelSize(edge) {
+	const { main, back } = edgeLabelSizes(edge);
+	if (!main || !back) return main ?? back;
+	return {
+		width: Math.max(main.width, back.width),
+		height: main.height + back.height - LABEL_PAD_H + LABEL_STACK_GAP
 	};
 }
 /**
@@ -11220,7 +11655,8 @@ function c4StyleViolations(model) {
 			message: `"${from.name}" → "${to.name}": una persona no accede directo a una base de datos; pasá por el contenedor que la usa`,
 			entity
 		});
-		if (rel.protocols?.includes("http") || rel.ports?.includes(80)) out.push({
+		const usage = relationUsage(rel);
+		if (usage.protocols.includes("http") || usage.ports.includes(80)) out.push({
 			severity: "warning",
 			code: "plaintext",
 			message: `"${from.name}" → "${to.name}" viaja sin cifrar (HTTP o puerto 80)`,
@@ -11238,29 +11674,47 @@ function deploymentCoverage(model) {
 	const out = [];
 	const views = sortedValues(model.views).filter((v) => v.level === "deployment" && v.environment);
 	const envs = [...new Set(views.map((v) => v.environment))];
-	const instances = sortedValues(model.elements).filter((el) => el.kind === "instance");
-	for (const env of envs) {
-		const deployed = new Set(instances.filter((i) => i.kind === "instance" && inEnvironment$1(i, env)).map((i) => i.kind === "instance" ? i.instance.of : ""));
-		const systems = new Set(views.filter((v) => v.environment === env && v.scope).map((v) => v.scope));
-		for (const id of deployed) {
-			const sys = [model.elements[id], ...ancestorsOf(model, id)].find((e) => e?.kind === "system");
-			if (sys && model.elements[id]?.kind !== "system") systems.add(sys.id);
+	const envName = (env) => model.workspace.environments?.find((e) => e.id === env)?.name ?? env;
+	for (const env of envs) for (const el of undeployedIn(model, env, systemsInPlay(model, env))) out.push({
+		severity: "warning",
+		code: "not-deployed",
+		message: `"${el.name}" no tiene ninguna instancia en ${envName(env)}`,
+		entity: {
+			type: "element",
+			id: el.id
 		}
-		const envName = model.workspace.environments?.find((e) => e.id === env)?.name ?? env;
-		for (const sys of systems) for (const id of descendantsOf(model, sys)) {
-			const el = model.elements[id];
-			if (!el || !(el.kind === "container" || el.kind === "store" || el.kind === "bus")) continue;
-			if (!inEnvironment$1(el, env) || deployed.has(id)) continue;
-			out.push({
-				severity: "warning",
-				code: "not-deployed",
-				message: `"${el.name}" no tiene ninguna instancia en ${envName}`,
-				entity: {
-					type: "element",
-					id
-				}
-			});
-		}
+	});
+	out.push(...singleReplicas(model, envs));
+	return out;
+}
+/**
+* Punto único de falla: algo propio de riesgo alto o crítico que en producción corre con una sola
+* réplica, en un nodo que tampoco está repetido. En los demás ambientes una réplica es lo normal.
+*/
+function singleReplicas(model, envs) {
+	const out = [];
+	const production = envs.filter((env) => isProductionEnvironment(model, env));
+	if (!production.length) return out;
+	for (const el of sortedValues(model.elements)) {
+		if (el.kind !== "instance") continue;
+		const target = model.elements[el.instance.of];
+		if (!target || target.scope === "external" || !("risk" in target) || !target.risk || RISK_WEIGHT[target.risk] < RISK_WEIGHT.high) continue;
+		const env = production.find((e) => inEnvironment$1(el, e));
+		if (!env) continue;
+		let copies = el.instance.replicas ?? 1;
+		for (const host of ancestorsOf(model, el.id)) if (host.kind === "node") copies *= host.node.instances ?? 1;
+		if (copies > 1) continue;
+		if (sortedValues(model.elements).filter((o) => o.kind === "instance" && o.id !== el.id && o.instance.of === target.id && inEnvironment$1(o, env)).length) continue;
+		const name = model.workspace.environments?.find((e) => e.id === env)?.name ?? env;
+		out.push({
+			severity: "warning",
+			code: "single-replica",
+			message: `"${target.name}" tiene riesgo ${RISK_TEXT[target.risk]} y en ${name} corre con una sola réplica`,
+			entity: {
+				type: "element",
+				id: el.id
+			}
+		});
 	}
 	return out;
 }
@@ -11440,7 +11894,7 @@ function findHotspots(model) {
 		}
 		if ((el.status === "deprecated" || el.status === "retired") && deps.length) {
 			score += 3 * deps.length;
-			reasons.push(`${el.status === "deprecated" ? "deprecado" : "retirado"} y todavía lo usan ${deps.length}`);
+			reasons.push(`${el.status === "deprecated" ? "se da de baja" : "retirado"} y todavía lo usan ${deps.length}`);
 		}
 		if (!risk && deps.length >= 5) {
 			score += deps.length;
@@ -11489,7 +11943,7 @@ function techText(el) {
 	return "";
 }
 function protocolsText(relations) {
-	return [...new Set(relations.map((r) => relationTechnology(r)).filter(Boolean))].join(", ");
+	return [...new Set(relations.map((r) => relationTechnologyBothWays(r)).filter(Boolean))].join(", ");
 }
 /** Etiqueta de una relación del lienzo; las implícitas resumen las relaciones que agrupan. */
 function edgeLabel(edge) {
@@ -11819,6 +12273,7 @@ function tagsOf(model, el) {
 	if (el.kind === "bus") tags.push("Queue");
 	if (isExternalDeep(model, el)) tags.push("Externo");
 	if (el.status === "planned") tags.push("Planificado");
+	if (el.status === "changing") tags.push("Modificado");
 	if (el.status === "deprecated") tags.push("Deprecado");
 	for (const t of el.tags ?? []) tags.push(t);
 	return tags;
@@ -12137,6 +12592,248 @@ function flowToMermaid(model, flow) {
 	for (const [id, a] of participants) head.push(`  participant ${a} as ${text(model.elements[id]?.name ?? id)}`);
 	return `${[...head, ...body].join("\n")}\n`;
 }
+const CONTAINER_CAPACITY = {
+	web: 2e3,
+	api: 800,
+	service: 300,
+	worker: 100,
+	function: 100,
+	other: 300,
+	mobile: null,
+	desktop: null
+};
+const STORE_CAPACITY = {
+	relational: 1e3,
+	document: 2e3,
+	"key-value": 1e4,
+	cache: 2e4,
+	search: 500,
+	object: 3e3,
+	graph: 500,
+	"time-series": 5e3,
+	warehouse: 50,
+	other: 1e3
+};
+const BUS_CAPACITY = {
+	queue: 3e3,
+	topic: 5e3,
+	stream: 2e4,
+	"event-bus": 2e3
+};
+/** Capacidad por réplica que se supone para un elemento sin el dato (`null`: sin límite conocido). */
+function assumedCapacity(el) {
+	if (el.kind === "container") return CONTAINER_CAPACITY[el.containerType ?? "other"];
+	if (el.kind === "store") return STORE_CAPACITY[el.store.type ?? "other"];
+	if (el.kind === "bus") return BUS_CAPACITY[el.bus.type ?? "topic"];
+	if (el.kind === "system") return el.scope === "external" ? null : CONTAINER_CAPACITY.service;
+	return null;
+}
+/** Capacidad por réplica declarada en el elemento, si la tiene. */
+function declaredCapacity(el) {
+	return "load" in el ? el.load?.capacity : void 0;
+}
+/**
+* Réplicas de un elemento en un ambiente: las de sus instancias desplegadas; si no hay despliegue,
+* las cargadas en sus costos; si tampoco, una.
+*/
+function replicasIn(model, id, env) {
+	const el = model.elements[id];
+	if (!el || !env) return 1;
+	let total = 0;
+	for (const other of Object.values(model.elements)) if (other.kind === "instance" && other.instance.of === id && inEnvironment$1(other, env)) total += other.instance.replicas ?? 1;
+	if (total) return total;
+	return el.finops?.costs?.[env]?.replicas ?? 1;
+}
+/** Lo que se simula por un elemento: él mismo, o su contenedor si es un componente. */
+function unitOf(model, id) {
+	const el = model.elements[id];
+	if (!el || el.kind === "actor" || el.kind === "group" || isDeploymentKind(el.kind)) return null;
+	if (el.kind === "component") return ancestorsOf(model, id).find((a) => a.kind === "container")?.id ?? id;
+	return id;
+}
+/** Una relación hacia un bus es de consumo (el bus le entrega) si su etiqueta lo dice. */
+const CONSUMES = /consum|suscri|subscri|escuch|listen|\blee\b|\bleen\b|\breads?\b|recibe/i;
+function simulateLoad(model, scenario) {
+	const notes = [];
+	const inScope = scenario.scope ? new Set([scenario.scope, ...descendantsOf(model, scenario.scope)]) : null;
+	const edges = [];
+	const entryWeights = new Map();
+	for (const rel of sortedValues(model.relations)) {
+		if (isNetworkRelation(model, rel)) continue;
+		const from = model.elements[rel.from];
+		const to = model.elements[rel.to];
+		if (!from || !to) continue;
+		const weight = rel.calls ?? 1;
+		if (!weight) continue;
+		if (from.kind === "actor") {
+			const unit = unitOf(model, rel.to);
+			if (unit && (!inScope || inScope.has(unit))) entryWeights.set(unit, (entryWeights.get(unit) ?? 0) + weight);
+			continue;
+		}
+		const a = unitOf(model, rel.from);
+		const b = unitOf(model, rel.to);
+		if (!a || !b || a === b) continue;
+		const toBus = model.elements[b].kind === "bus";
+		const fromBus = model.elements[a].kind === "bus";
+		if (toBus && !fromBus && CONSUMES.test(rel.label ?? "")) {
+			edges.push({
+				from: b,
+				to: a,
+				weight,
+				async: true,
+				relation: rel.id
+			});
+			notes.push(`"${model.elements[a].name}" consume de "${model.elements[b].name}" (por la etiqueta de la relación)`);
+		} else edges.push({
+			from: a,
+			to: b,
+			weight,
+			async: fromBus,
+			relation: rel.id
+		});
+	}
+	if (!entryWeights.size) {
+		const called = new Set(edges.map((e) => e.to));
+		for (const e of edges) if (!called.has(e.from) && (!inScope || inScope.has(e.from))) entryWeights.set(e.from, 1);
+		if (entryWeights.size) notes.push("Ningún actor llega a lo simulado: el tráfico entra por lo que nadie llama");
+	}
+	const totalWeight = [...entryWeights.values()].reduce((a, b) => a + b, 0);
+	if (entryWeights.size > 1) notes.push(`El tráfico se reparte entre ${entryWeights.size} entradas según las llamadas por pedido de cada relación (por defecto, en partes iguales)`);
+	const out = new Map();
+	for (const e of edges) out.set(e.from, [...out.get(e.from) ?? [], e]);
+	const order = [];
+	const state = new Map();
+	const live = new Set();
+	const visit = (id) => {
+		state.set(id, "open");
+		for (const e of out.get(id) ?? []) {
+			const seen = state.get(e.to);
+			if (seen === "open") continue;
+			live.add(e);
+			if (!seen) visit(e.to);
+		}
+		state.set(id, "done");
+		order.push(id);
+	};
+	for (const id of [...entryWeights.keys()].sort()) if (!state.has(id)) visit(id);
+	order.reverse();
+	const capacity = new Map();
+	for (const id of order) {
+		const el = model.elements[id];
+		const declared = declaredCapacity(el);
+		const perReplica = declared ?? assumedCapacity(el);
+		const replicas = replicasIn(model, id, scenario.environment);
+		capacity.set(id, {
+			total: perReplica === null ? null : perReplica * replicas,
+			perReplica,
+			replicas,
+			assumed: declared === void 0 && perReplica !== null
+		});
+	}
+	const run = (rps, limited) => {
+		const load = new Map();
+		const served = new Map();
+		const flow = new Map();
+		for (const [id, w] of entryWeights) load.set(id, totalWeight ? rps * w / totalWeight : 0);
+		for (const id of order) {
+			const l = load.get(id) ?? 0;
+			const cap = limited ? capacity.get(id).total : null;
+			const s = cap === null ? l : Math.min(l, cap);
+			served.set(id, s);
+			for (const e of out.get(id) ?? []) {
+				if (!live.has(e)) continue;
+				const through = s * e.weight;
+				flow.set(e, through);
+				load.set(e.to, (load.get(e.to) ?? 0) + through);
+			}
+		}
+		return {
+			load,
+			served,
+			flow
+		};
+	};
+	const fedByBus = new Set();
+	for (const id of order) {
+		const incoming = [...live].filter((e) => e.to === id);
+		if (incoming.length && incoming.every((e) => e.async) && !entryWeights.has(id)) fedByBus.add(id);
+	}
+	const unit = run(1, false);
+	let limit = null;
+	let failureLimit = null;
+	const earlier = (at, id, best) => !best || at < best.rps - 1e-9 || Math.abs(at - best.rps) < 1e-9 && id < best.bottleneck;
+	for (const id of order) {
+		const cap = capacity.get(id).total;
+		const k = unit.load.get(id) ?? 0;
+		if (cap === null || k <= 0) continue;
+		const at = cap / k;
+		if (earlier(at, id, limit)) limit = {
+			rps: at,
+			bottleneck: id,
+			backlog: fedByBus.has(id)
+		};
+		if (!fedByBus.has(id) && earlier(at, id, failureLimit)) failureLimit = {
+			rps: at,
+			bottleneck: id
+		};
+	}
+	const real = run(Math.max(0, scenario.rps), true);
+	const nodes = {};
+	for (const id of order) {
+		const cap = capacity.get(id);
+		const load = real.load.get(id) ?? 0;
+		const utilization = cap.total === null ? null : cap.total > 0 ? load / cap.total : Infinity;
+		const nodeState = load <= 0 ? "idle" : utilization === null ? "ok" : utilization > 1 + 1e-9 ? "saturated" : utilization >= .7 ? "busy" : "ok";
+		nodes[id] = {
+			id,
+			load,
+			served: real.served.get(id) ?? 0,
+			capacity: cap.total,
+			perReplica: cap.perReplica,
+			replicas: cap.replicas,
+			assumed: cap.assumed,
+			utilization,
+			state: nodeState,
+			affectedBy: [],
+			backlog: 0
+		};
+	}
+	const saturated = order.filter((id) => nodes[id].state === "saturated").sort((a, b) => (nodes[b].utilization ?? 0) - (nodes[a].utilization ?? 0) || a.localeCompare(b));
+	const callers = new Map();
+	for (const e of live) if (!e.async) callers.set(e.to, [...callers.get(e.to) ?? [], e.from]);
+	for (const hot of saturated) {
+		const seen = new Set([hot]);
+		const queue = [hot];
+		while (queue.length) for (const caller of callers.get(queue.shift()) ?? []) {
+			if (seen.has(caller)) continue;
+			seen.add(caller);
+			nodes[caller].affectedBy.push(hot);
+			queue.push(caller);
+		}
+		const node = nodes[hot];
+		const viaBus = [...live].filter((e) => e.to === hot && e.async).reduce((sum, e) => sum + (real.flow.get(e) ?? 0), 0);
+		if (viaBus > 0) node.backlog = Math.min(viaBus, node.load - node.served);
+	}
+	if (order.some((id) => nodes[id].assumed)) notes.push("Las capacidades sin cargar se supusieron por tipo: ajustalas donde tengas el dato");
+	return {
+		nodes,
+		edges: [...live].map((e) => ({
+			relation: e.relation,
+			from: e.from,
+			to: e.to,
+			rps: real.flow.get(e) ?? 0,
+			async: e.async
+		})).sort((a, b) => a.relation.localeCompare(b.relation)),
+		entries: [...entryWeights].map(([id, w]) => ({
+			id,
+			rps: totalWeight ? Math.max(0, scenario.rps) * w / totalWeight : 0
+		})).sort((a, b) => a.id.localeCompare(b.id)),
+		limit,
+		failureLimit,
+		saturated,
+		notes
+	};
+}
 //#endregion
 //#region packages/cli/src/io.ts
 const nodeIo = {
@@ -12151,7 +12848,7 @@ var UsageError = class extends Error {
 		this.name = "UsageError";
 	}
 };
-const MARK$1 = {
+const MARK$2 = {
 	error: "✗",
 	warning: "!",
 	info: "·"
@@ -12163,7 +12860,7 @@ const WORD = {
 };
 function formatDiagnostic(d) {
 	const where = d.file ?? (d.entity ? `${d.entity.type}:${d.entity.id}` : "");
-	return `${MARK$1[d.severity]} ${WORD[d.severity].padEnd(5)} ${where ? `${where}  ` : ""}${d.message} [${d.code}]`;
+	return `${MARK$2[d.severity]} ${WORD[d.severity].padEnd(5)} ${where ? `${where}  ` : ""}${d.message} [${d.code}]`;
 }
 function countBySeverity(diagnostics) {
 	return {
@@ -19020,7 +19717,7 @@ attachments/                 # adjuntos que Aegon conserva tal cual
 | \`instance\` | despliegue | node | \`instance: { of, replicas }\` (\`of\`: el container, store, bus o system que despliega), \`addresses\`, \`resource\` |
 
 Campos comunes: \`name\`, \`description\` (corta), \`docs\` (Markdown), \`groups\` (IDs de grupos),
-\`scope\` (internal/external), \`status\` (planned/live/deprecated/retired), \`tags\`, \`owner\`, \`links\`,
+\`scope\` (internal/external), \`status\` (planned = nuevo / live / changing = se modifica / deprecated = se da de baja / retired), \`tags\`, \`owner\`, \`links\`,
 \`properties\` (clave → texto). \`risk\` (low/medium/high/critical) va en todo menos actor y group.
 \`technology\` (lenguajes, frameworks, plataformas) va solo en system, container y component: una
 base de datos se describe por su motor y un bus de mensajería por su broker.
@@ -19100,10 +19797,18 @@ protocols: [jdbc]
 - **Una relación por par de elementos.** Si la comunicación va en ambos sentidos usá
   \`direction: bidirectional\` en vez de dos relaciones.
 - \`protocols\` usa los IDs del catálogo de Aegon (\`https\`, \`rest\`, \`grpc\`, \`graphql\`, \`kafka\`,
-  \`amqp\`, \`jdbc\`, \`sql\`, \`tds\`, \`resp\`, \`s3-api\`, \`sftp\`, \`oidc\`, \`tcp\`, \`bgp\`…) y \`ports\` los
-  puertos de destino (\`ports: [443, 80]\`).
+  \`amqp\`, \`jdbc\`, \`sql\`, \`tds\`, \`resp\`, \`s3-api\`, \`sftp\`, \`oidc\`, \`tcp\`, \`bgp\`…). Para decir por
+  qué puertos va cada uno: \`protocols: [{ id: dns, ports: [53] }, { id: ntp, ports: [123] }]\`.
+  \`ports\` queda para puertos de destino sin protocolo (\`ports: [8080]\`).
+- En una relación bidireccional, \`label\` y \`protocols\` son los de la ida (\`from\` → \`to\`) y
+  \`back: { label, protocols }\` los de la vuelta, con los puertos por los que escucha \`from\`. El
+  lienzo muestra cada sentido con lo suyo.
 - Conectá los elementos más específicos posibles (container → container). Aegon dibuja las
   relaciones implícitas en los niveles superiores (sistema → sistema) automáticamente.
+- **Simulador de carga (opcional).** \`calls\` en una relación son las llamadas al destino por cada
+  pedido que atiende el origen (por defecto 1; \`0.2\` es uno de cada cinco). En un container, store,
+  bus o system, \`load: { capacity: 450 }\` es lo que atiende una réplica por segundo. Cargalos solo
+  si tenés el dato: lo que falta se supone por tipo y queda marcado como supuesto.
 
 ## Flujos y comentarios
 
@@ -19194,6 +19899,7 @@ const ORDER = {
 		"links",
 		"environments",
 		"finops",
+		"load",
 		"properties",
 		"docs",
 		"extensions"
@@ -19207,10 +19913,17 @@ const ORDER = {
 		"protocols",
 		"ports",
 		"direction",
+		"back",
+		"calls",
 		"status",
 		"tags",
 		"properties",
 		"extensions"
+	],
+	back: [
+		"label",
+		"protocols",
+		"ports"
 	],
 	view: [
 		"id",
@@ -19262,7 +19975,15 @@ const ORDER = {
 		"h"
 	],
 	link: ["label", "url"],
-	edge: ["shape", "hidden"],
+	edge: [
+		"shape",
+		"hidden",
+		"from",
+		"to",
+		"points",
+		"labelAt",
+		"backLabelAt"
+	],
 	environment: ["id", "name"],
 	finopsSettings: [
 		"currency",
@@ -19350,7 +20071,9 @@ function canonicalElement(el, environments = []) {
 	return ordered(value, ORDER.element);
 }
 function canonicalRelation(rel) {
-	return ordered({ ...rel }, ORDER.relation);
+	const value = { ...rel };
+	if (rel.back) value.back = ordered(rel.back, ORDER.back);
+	return ordered(value, ORDER.relation);
 }
 function canonicalView(view) {
 	const value = { ...view };
@@ -20225,7 +20948,7 @@ function resolveRef(items, ref, noun) {
 }
 //#endregion
 //#region packages/cli/src/commands/diff.ts
-const MARK = {
+const MARK$1 = {
 	added: "+",
 	modified: "~",
 	removed: "-"
@@ -20274,7 +20997,7 @@ async function diff(io, ws, ref, opts) {
 		return 0;
 	}
 	for (const change of changes) {
-		io.stdout(`${MARK[change.kind]} ${summarizeChange(change)}\n`);
+		io.stdout(`${MARK$1[change.kind]} ${summarizeChange(change)}\n`);
 		if (change.kind !== "modified" || change.entity === "view") continue;
 		for (const f of change.fields) io.stdout(`    ${f.path}: ${show(f.before)} → ${show(f.after)}\n`);
 	}
@@ -108979,12 +109702,23 @@ function normalizeTechnologies(technologies, warnings) {
 		return id ?? t;
 	});
 }
-/** IDs del catálogo de protocolos (`HTTPS` → `https`, `gRPC` → `grpc`). */
+/**
+* Protocolos de una relación con los IDs del catálogo (`HTTPS` → `https`, `gRPC` → `grpc`). Cada uno
+* puede traer sus puertos pegados con dos puntos y separados con barra: `dns:53`, `ldap:389/636`.
+*/
 function normalizeProtocols(protocols, warnings) {
-	return protocols.map((p) => {
-		const id = catalogId(PROTOCOLS, p, findProtocol);
-		if (!id) warnings.push(`Protocolo "${p}" fuera del catálogo: se guarda tal cual`);
-		return id ?? p;
+	return protocols.map((entry) => {
+		const text = typeof entry === "string" ? /^(.+?):([\d/+]+)$/.exec(entry.trim()) : null;
+		const name = typeof entry === "string" ? text ? text[1] : entry.trim() : entry.id;
+		const ports = typeof entry === "string" ? text ? text[2].split(/[/+]/).filter(Boolean).map(Number) : [] : entry.ports;
+		const bad = ports.filter((p) => !Number.isInteger(p) || p < 1 || p > 65535);
+		if (bad.length) throw new WorkspaceError("invalid-field", `Puertos inválidos en "${name}": ${bad.join(", ")} (1 a 65535)`);
+		const id = catalogId(PROTOCOLS, name, findProtocol);
+		if (!id) warnings.push(`Protocolo "${name}" fuera del catálogo: se guarda tal cual`);
+		return ports.length ? {
+			id: id ?? name,
+			ports: [...new Set(ports)]
+		} : id ?? name;
 	});
 }
 function planConnect(model, input) {
@@ -109004,7 +109738,14 @@ function planConnect(model, input) {
 	if (input.direction && input.direction !== "outgoing") fields.direction = input.direction;
 	if (input.status) fields.status = input.status;
 	if (input.tags?.length) fields.tags = input.tags;
+	const returning = {};
+	if (input.back?.label) returning.label = input.back.label;
+	if (input.back?.protocols?.length) returning.protocols = normalizeProtocols(input.back.protocols, warnings);
+	const hasReturn = Object.keys(returning).length > 0;
+	if (hasReturn) fields.direction = "bidirectional";
 	const suggestions = fields.protocols ? [] : suggestProtocols(model.elements[to], "", 3).map((p) => p.id);
+	const existing = relationBetween(model, from, to);
+	if (hasReturn && (!existing || existing.from === from)) fields.back = relationBackWith(existing?.back, returning) ?? void 0;
 	const connected = connectOp(model, from, to, fields);
 	const base = {
 		id: connected.id,
@@ -109018,10 +109759,23 @@ function planConnect(model, input) {
 		op: connected.op,
 		result: "created"
 	};
-	if (connected.kind === "bidirectional") {
+	if (existing && existing.from === to) {
+		const { label, protocols, ports, direction: _direction, ...rest } = fields;
+		const back = relationBackWith(existing.back, {
+			...label ? { label } : {},
+			...protocols ? { protocols } : {},
+			...ports ? { ports } : {}
+		});
 		const patch = {
-			...fields,
-			direction: "bidirectional"
+			...rest,
+			...returning
+		};
+		if (existing.direction !== "bidirectional") patch.direction = "bidirectional";
+		if (back && JSON.stringify(back) !== JSON.stringify(existing.back ?? null)) patch.back = back;
+		if (!Object.keys(patch).length) return {
+			...base,
+			op: null,
+			result: "exists"
 		};
 		return {
 			...base,
@@ -109030,7 +109784,7 @@ function planConnect(model, input) {
 				id: connected.id,
 				patch
 			},
-			result: "bidirectional"
+			result: connected.kind === "bidirectional" ? "bidirectional" : "updated"
 		};
 	}
 	if (!Object.keys(fields).length) return {
@@ -109460,6 +110214,69 @@ async function init(io, dir, opts) {
 	return 0;
 }
 //#endregion
+//#region packages/cli/src/commands/simulate.ts
+const number = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 });
+const MARK = {
+	idle: " ",
+	ok: "✓",
+	busy: "!",
+	saturated: "✗"
+};
+/**
+* `aegon simulate`: cuánto tráfico le llega a cada parte y qué se queda sin margen primero. El
+* mismo cálculo que el modo Simular de la app (es un modelo, no una medición).
+*/
+function simulate(io, ws, opts) {
+	const model = ws.model;
+	const environments = model.workspace.environments ?? [];
+	if (opts.env && !environments.some((e) => e.id === opts.env)) throw new WorkspaceError("not-found", `No existe el ambiente "${opts.env}".${environments.length ? ` Hay: ${environments.map((e) => e.id).join(", ")}` : ""}`);
+	const environment = opts.env ?? environments.find((e) => isProductionEnvironment(model, e.id))?.id;
+	const scope = opts.system ? ws.element(opts.system) : void 0;
+	if (scope && scope.kind !== "system") throw new WorkspaceError("invalid-scope", `"${scope.name}" no es un sistema: --system espera un sistema`);
+	const result = simulateLoad(model, {
+		rps: opts.rps,
+		environment,
+		scope: scope?.id
+	});
+	const ok = !result.saturated.length;
+	if (opts.json) {
+		json(io, {
+			ok,
+			workspace: workspaceJson(ws),
+			rps: opts.rps,
+			environment: environment ?? null,
+			system: scope?.id ?? null,
+			...result
+		});
+		return opts.strict && !ok ? 1 : 0;
+	}
+	const name = (id) => model.elements[id]?.name ?? id;
+	const envName = environments.find((e) => e.id === environment)?.name;
+	io.stdout(`Simulación · ${number.format(opts.rps)} pedidos por segundo${envName ? ` · ${envName}` : ""}${scope ? ` · ${scope.name}` : ""}\n`);
+	if (!result.entries.length) {
+		io.stdout("No hay tráfico que seguir: ningún actor llega a lo simulado.\n");
+		return 0;
+	}
+	io.stdout(`Entra por: ${result.entries.map((e) => `${name(e.id)} (${number.format(e.rps)})`).join(", ")}\n\n`);
+	const rows = Object.values(result.nodes).sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1) || b.load - a.load || a.id.localeCompare(b.id));
+	for (const node of rows) {
+		const usage = node.utilization === null ? "sin límite" : `${Math.round(node.utilization * 100)}%`;
+		const of = node.capacity === null ? "" : ` de ${number.format(node.capacity)}`;
+		const capacity = node.perReplica === null ? "" : `  ${node.replicas} × ${number.format(node.perReplica)}${node.assumed ? " (supuesto)" : ""}`;
+		const extra = node.backlog > 0 ? `  se acumulan ${number.format(node.backlog)}` : node.affectedBy.length && node.state !== "saturated" ? `  lo frena ${name(node.affectedBy[0])}` : "";
+		io.stdout(`  ${MARK[node.state]} ${name(node.id)} (${node.id})  ${usage}  ${number.format(node.load)}${of}${capacity}${extra}\n`);
+	}
+	io.stdout("\n");
+	if (result.limit) {
+		const first = `${result.limit.backlog ? "se atrasa" : "satura"} ${name(result.limit.bottleneck)}`;
+		const fails = result.limit.backlog && result.failureLimit ? `; falla desde ${number.format(result.failureLimit.rps)} (${name(result.failureLimit.bottleneck)})` : "";
+		io.stdout(`${ok ? "✓" : "✗"} Aguanta hasta ${number.format(result.limit.rps)} pedidos por segundo: primero ${first}${fails}\n`);
+	} else io.stdout("✓ Nada de lo que recorre el tráfico tiene un límite conocido\n");
+	if (!ok) io.stdout(`  Saturado con este tráfico: ${result.saturated.map(name).join(", ")}\n`);
+	for (const note of result.notes) io.stdout(`  · ${note}\n`);
+	return opts.strict && !ok ? 1 : 0;
+}
+//#endregion
 //#region packages/cli/src/cli.ts
 const VERSION = "0.1.0";
 const GLOBAL = {
@@ -109581,7 +110398,7 @@ Despliegue:
   --resource <id>          ID del recurso en el proveedor (vpc-…, i-…, ARN)
   --env <a,b>              Ambientes donde existe
   --external               Elemento externo (fuera de la organización)
-  --status <estado>        planned, live, deprecated, retired
+  --status <estado>        planned (nuevo), live, changing (se modifica), deprecated (se da de baja), retired
   --risk <riesgo>          low, medium, high, critical
   --group <id>             Grupo al que pertenece (repetible)
   --tags <a,b>  --owner <equipo>`,
@@ -109675,12 +110492,18 @@ Despliegue:
 		help: `Opciones:
   -l, --label <texto>      Qué hace la relación ("Lee y escribe", "Publica pagos")
   -d, --description <txt>  Descripción larga
-  -p, --protocols <a,b>    Protocolos del catálogo (https, rest, grpc, kafka, jdbc…)
-  --ports <a,b>            Puertos de destino (443, 8080)
+  -p, --protocols <a,b>    Protocolos del catálogo (https, rest, grpc, kafka, jdbc…). Cada uno puede
+                           llevar sus puertos: dns:53,ntp:123,ldap:389/636
+  --ports <a,b>            Puertos de destino sin protocolo (8080). Si coinciden con el puerto
+                           habitual de un protocolo (53 con dns), se muestran junto a ese
   --bidirectional          La comunicación va en ambos sentidos
-  --status <estado>        planned, live, deprecated, retired
+  --back-label <texto>     Qué hace en el otro sentido (de <hasta> hacia <desde>)
+  --back-protocols <a,b>   Protocolos del otro sentido, con los puertos por los que escucha <desde>:
+                           smb:445. Con cualquiera de los dos, la relación queda bidireccional
+  --status <estado>        planned (nuevo), live, changing (se modifica), deprecated (se da de baja), retired
 
-Si ya existe la relación al revés, se vuelve bidireccional; si ya existe, se completa con lo indicado.`,
+Si ya existe la relación al revés, se vuelve bidireccional y lo indicado queda como su vuelta; si ya
+existe, se completa con lo indicado.`,
 		options: {
 			label: {
 				type: "string",
@@ -109696,6 +110519,8 @@ Si ya existe la relación al revés, se vuelve bidireccional; si ya existe, se c
 			},
 			ports: { type: "string" },
 			bidirectional: { type: "boolean" },
+			"back-label": { type: "string" },
+			"back-protocols": { type: "string" },
 			status: { type: "string" }
 		},
 		run: async (io, pos, v) => {
@@ -109712,6 +110537,10 @@ Si ya existe la relación al revés, se vuelve bidireccional; si ya existe, se c
 					return n;
 				}),
 				direction: v.bidirectional ? "bidirectional" : void 0,
+				back: {
+					label: str(v["back-label"]),
+					protocols: list(v["back-protocols"])
+				},
 				status: oneOf(v.status, STATUSES, "status")
 			}, { json: !!v.json });
 		}
@@ -109795,6 +110624,34 @@ Un flujo: aegon export flow <id> mermaid|text (diagrama de secuencia de Mermaid 
 		run: async (io, pos, v) => {
 			need(pos, 1, "flow <id>");
 			return flow(io, await openWorkspace(io, v), pos[0], { json: !!v.json });
+		}
+	},
+	simulate: {
+		usage: "simulate <pedidos-por-segundo>",
+		summary: "Simula carga: cuánto le llega a cada parte y qué se satura primero",
+		help: `Reparte el tráfico por las relaciones del modelo y lo compara con lo que aguanta cada parte
+(capacidad por réplica × réplicas del ambiente). Lo que no está cargado se supone por tipo.
+
+Opciones:
+  --env <id>               Ambiente del que salen las réplicas (por defecto, el productivo)
+  --system <id>            Simula solo el tráfico que entra a este sistema
+  --strict                 Sale con 1 si algo se satura con ese tráfico`,
+		options: {
+			env: { type: "string" },
+			system: { type: "string" },
+			strict: { type: "boolean" }
+		},
+		run: async (io, pos, v) => {
+			need(pos, 1, "simulate <pedidos-por-segundo>");
+			const rps = Number(pos[0]);
+			if (!Number.isFinite(rps) || rps < 0) throw new UsageError(`"${pos[0]}" no es una cantidad de pedidos por segundo`);
+			return simulate(io, await openWorkspace(io, v), {
+				rps,
+				env: str(v.env),
+				system: str(v.system),
+				strict: !!v.strict,
+				json: !!v.json
+			});
 		}
 	},
 	comments: {
