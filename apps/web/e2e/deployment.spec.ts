@@ -50,7 +50,7 @@ test('lienzo de despliegue: nodos desde el fantasma e instancias de contenedores
   const inner = (await instance.boundingBox())!;
   const outer = (await vpc.boundingBox())!;
   expect(inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height).toBe(true);
-  await expect(page.getByRole('button', { name: 'QA', pressed: true })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Ambientes' }).getByRole('button', { name: 'QA', pressed: true })).toBeVisible();
 
   // Las relaciones de Web App se proyectan sobre la instancia si su destino también está desplegado.
   await page.mouse.dblclick(box.x + box.width * 0.88, box.y + box.height * 0.85);
@@ -99,4 +99,55 @@ test('exportar el lienzo a PNG y PDF con cartel y leyenda', async ({ page }) => 
   expect(pdfText.startsWith('%PDF-1.4')).toBe(true);
   expect(pdfText).toContain('/Subtype /Image');
   expect(pdfText.trimEnd().endsWith('%%EOF')).toBe(true);
+});
+
+test('el modo Desplegar lleva al despliegue del sistema; Diseñar y Costos cambian de mirada', async ({ page }) => {
+  await expect(page.getByTestId('mode-design')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('mode-deploy').click();
+  await framed(page, 'home-banking-despliegue-prod');
+  await expect(page.getByTestId('mode-deploy')).toHaveAttribute('aria-pressed', 'true');
+  // La barra del lienzo dice en qué ambiente se está y que no falta nada.
+  await expect(page.getByTestId('deploy-env-prod')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('deploy-complete')).toBeVisible();
+
+  await page.getByTestId('mode-design').click();
+  await framed(page, 'landscape');
+  await expect(page.getByTestId('mode-design')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByTestId('mode-costs').click();
+  await expect(page.getByTestId('mode-costs')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('costs-panel')).toBeVisible();
+  await expect(page.getByTestId('cost-home-banking')).toBeVisible();
+});
+
+test('copiar el despliegue a otro ambiente y desplegar de una vez lo que falta', async ({ page }) => {
+  await page.getByTestId('mode-deploy').click();
+  await framed(page, 'home-banking-despliegue-prod');
+
+  // QA no tiene despliegue: se copia el de producción, con los mismos nodos para el ambiente nuevo.
+  await page.getByTestId('deploy-env-qa').click();
+  await page.getByTestId('deploy-copy-qa').click();
+  await framed(page, 'home-banking-despliegue-qa');
+  await expect(page.getByTestId('deploy-env-qa')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('deploy-vpc-qa')).toBeVisible();
+  await expect(page.getByTestId('node-pagos-api-qa')).toBeVisible();
+  await expect(page.getByTestId('deploy-complete')).toBeVisible();
+
+  // Preproducción arranca vacío: la bandeja lista lo que falta (la app móvil no existe ahí).
+  await page.getByTestId('deploy-env-pre').click();
+  await page.getByTestId('deploy-empty-pre').click();
+  await expect(page.getByTestId('deploy-missing')).toContainText('7 sin desplegar');
+  await expect(page.getByTestId('deploy-row-pagos-api')).toBeVisible();
+  await expect(page.getByTestId('deploy-row-app-movil')).toHaveCount(0);
+  await expect(page.getByTestId('health-indicator')).toBeVisible();
+
+  await page.getByTestId('deploy-all').click();
+  await expect(page.getByTestId('deploy-ambiente-pre')).toContainText('Ambiente Preproducción');
+  await expect(page.getByTestId('node-pagos-api-pre')).toBeVisible();
+  await expect(page.getByTestId('deploy-complete')).toBeVisible();
+  // Ya no falta nada: la salud deja de marcarlo.
+  await expect(page.getByTestId('health-indicator')).toHaveCount(0);
+  // Los ambientes con despliegue quedan a un click.
+  await page.getByTestId('deploy-env-prod').click();
+  await framed(page, 'home-banking-despliegue-prod');
 });

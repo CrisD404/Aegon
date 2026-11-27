@@ -48,6 +48,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]
@@ -214,6 +215,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]
@@ -337,6 +339,16 @@
         "kind": {
           "type": "string",
           "const": "system"
+        },
+        "load": {
+          "type": "object",
+          "properties": {
+            "capacity": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [
@@ -392,6 +404,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]
@@ -528,6 +541,16 @@
             "function",
             "other"
           ]
+        },
+        "load": {
+          "type": "object",
+          "properties": {
+            "capacity": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [
@@ -583,6 +606,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]
@@ -761,6 +785,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]
@@ -918,6 +943,16 @@
             "engine"
           ],
           "additionalProperties": false
+        },
+        "load": {
+          "type": "object",
+          "properties": {
+            "capacity": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [
@@ -974,6 +1009,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]
@@ -1125,6 +1161,16 @@
             "broker"
           ],
           "additionalProperties": false
+        },
+        "load": {
+          "type": "object",
+          "properties": {
+            "capacity": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [
@@ -1181,6 +1227,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]
@@ -1375,6 +1422,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]
@@ -1608,6 +1656,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]
@@ -1826,6 +1875,7 @@
           "enum": [
             "planned",
             "live",
+            "changing",
             "deprecated",
             "retired"
           ]

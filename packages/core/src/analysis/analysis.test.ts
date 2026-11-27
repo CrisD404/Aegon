@@ -55,7 +55,7 @@ describe('analyzeModel', () => {
   it('hotspots: riesgo, deprecados en uso y mucha dependencia', () => {
     const a = analyzeModel(withOps([{ type: 'element.update', id: 'core', patch: { status: 'deprecated' } }]));
     const core = a.hotspots.find((h) => h.id === 'core')!;
-    expect(core.reasons).toEqual(['deprecado y todavía lo usan 1', '1 dependiente']);
+    expect(core.reasons).toEqual(['se da de baja y todavía lo usan 1', '1 dependiente']);
     expect(core.dependents).toEqual(['api']);
     expect(analysisDiagnostics(a, sampleModel()).some((d) => d.code === 'risk-hotspot')).toBe(true);
   });

@@ -15,19 +15,24 @@ import {
 } from '@aegon/core';
 import { useWorkspace } from '../store/workspace.ts';
 import { revealElement } from '../lib/actions.ts';
-import { Field, Select, TagInput, TextInput } from '../ui/primitives.tsx';
+import { Field, Select, TagInput, TextInput, summarize } from '../ui/primitives.tsx';
 
 type Update = (patch: ElementPatch, field: string) => void;
 type DeploymentElement = Extract<Element, { kind: 'node' | 'infra' | 'instance' }>;
+type NodeElement = Extract<Element, { kind: 'node' }>;
 
 /**
- * Campos de despliegue del inspector: qué es el nodo o la infraestructura, qué despliega una
- * instancia, dónde está (nodo padre) y sus datos de red (direcciones, ID del recurso).
+ * Lo esencial de un elemento de despliegue, siempre a la vista en el inspector: qué es el nodo o
+ * la infraestructura, qué despliega una instancia y dónde está (nodo padre). El resto va en
+ * secciones plegables: `NodeDetailFields` (tamaño, región…) y `NetworkFields` (direcciones).
  */
 export function DeploymentFields({ el, update }: { el: DeploymentElement; update: Update }) {
   const model = useWorkspace((s) => s.model);
   const hosts = sortedValues(model.elements).filter((n) => n.kind === 'node' && n.id !== el.id && canHaveParent(el.kind, n.kind));
+  // El camino completo solo suma si hay más de un nivel: con uno, es lo que ya dice el selector.
   const path = deploymentPath(model, el.id);
+  const parent = el.parent ? model.elements[el.parent] : undefined;
+  const showPath = Boolean(path) && path !== parent?.name;
 
   return (
     <>
@@ -46,35 +51,37 @@ export function DeploymentFields({ el, update }: { el: DeploymentElement; update
           options={hosts.map((n) => ({ value: n.id, label: n.name }))}
           placeholder={el.kind === 'node' ? 'Nada (nodo raíz)' : 'Ningún nodo'}
         />
-        {path ? <span className="mt-1 block truncate text-[11px] text-fg-subtle" title={path}>{path}</span> : null}
-      </Field>
-
-      <Field label="Direcciones" hint="IPs, CIDRs, hosts o URLs">
-        <TagInput values={el.addresses ?? []} onChange={(v) => update({ addresses: v.length ? v : null }, 'addresses')} placeholder="10.0.0.12, app.example.com:8443…" renderChip={(v) => <span className="font-mono text-[11px]">{v}</span>} />
-      </Field>
-      <Field label="ID del recurso" hint="vpc-…, sg-…, i-…, ARN">
-        <TextInput value={el.resource ?? ''} onChange={(e) => update({ resource: e.target.value.trim() ? e.target.value : null }, 'resource')} placeholder="Opcional" className="font-mono text-[12px]" />
+        {showPath ? <span className="mt-1 block truncate text-[11px] text-fg-subtle" title={path}>{path}</span> : null}
       </Field>
     </>
   );
 }
 
-function NodeFields({ el, update }: { el: Extract<Element, { kind: 'node' }>; update: Update }) {
-  const setNode = (patch: Partial<NodeDetails>) => {
-    const next: Record<string, unknown> = { ...el.node, ...patch };
-    for (const k of Object.keys(next)) if (next[k] === undefined || next[k] === '' || Number.isNaN(next[k])) delete next[k];
-    update({ node: next as NodeDetails }, 'node');
-  };
+function setNodeDetails(el: NodeElement, update: Update, patch: Partial<NodeDetails>) {
+  const next: Record<string, unknown> = { ...el.node, ...patch };
+  for (const k of Object.keys(next)) if (next[k] === undefined || next[k] === '' || Number.isNaN(next[k])) delete next[k];
+  update({ node: next as NodeDetails }, 'node');
+}
+
+function NodeFields({ el, update }: { el: NodeElement; update: Update }) {
+  const setNode = (patch: Partial<NodeDetails>) => setNodeDetails(el, update, patch);
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Field label="Tipo de nodo">
+        <Select value={el.node.type} onChange={(v) => v && setNode({ type: v })} options={NODE_TYPES.map((t) => ({ value: t, label: NODE_TYPE_LABEL[t] }))} />
+      </Field>
+      <Field label="Proveedor">
+        <Select value={el.node.provider} onChange={(v) => setNode({ provider: v })} options={NODE_PROVIDER_CATALOG.map((p) => ({ value: p.id, label: p.name }))} placeholder="Sin especificar" />
+      </Field>
+    </div>
+  );
+}
+
+/** Datos secundarios de un nodo (sección "Detalles"): tamaño, cantidad, región y cuenta. */
+export function NodeDetailFields({ el, update }: { el: NodeElement; update: Update }) {
+  const setNode = (patch: Partial<NodeDetails>) => setNodeDetails(el, update, patch);
   return (
     <>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Tipo de nodo">
-          <Select value={el.node.type} onChange={(v) => v && setNode({ type: v })} options={NODE_TYPES.map((t) => ({ value: t, label: NODE_TYPE_LABEL[t] }))} />
-        </Field>
-        <Field label="Proveedor">
-          <Select value={el.node.provider} onChange={(v) => setNode({ provider: v })} options={NODE_PROVIDER_CATALOG.map((p) => ({ value: p.id, label: p.name }))} placeholder="Sin especificar" />
-        </Field>
-      </div>
       <div className="grid grid-cols-[1fr_88px] gap-3">
         <Field label="Tamaño / tipo de instancia">
           <TextInput value={el.node.size ?? ''} onChange={(e) => setNode({ size: e.target.value || undefined })} placeholder="m5.2xlarge" className="font-mono text-[12px]" />
@@ -93,6 +100,33 @@ function NodeFields({ el, update }: { el: Extract<Element, { kind: 'node' }>; up
       </div>
     </>
   );
+}
+
+/** Resumen de `NodeDetailFields`: `m5.2xlarge × 3 · us-east-1 · prod-123`. */
+export function nodeDetailsSummary(el: NodeElement): string {
+  const { size, instances, region, account } = el.node;
+  const count = instances && instances > 1 ? `× ${instances}` : undefined;
+  return summarize(size ? [size, count].filter(Boolean).join(' ') : count, region, account);
+}
+
+/** Datos de red (sección "Red"): direcciones e ID del recurso en el proveedor. */
+export function NetworkFields({ el, update }: { el: DeploymentElement; update: Update }) {
+  return (
+    <>
+      <Field label="Direcciones" hint="IPs, CIDRs, hosts o URLs">
+        <TagInput values={el.addresses ?? []} onChange={(v) => update({ addresses: v.length ? v : null }, 'addresses')} placeholder="10.0.0.12, app.example.com:8443…" renderChip={(v) => <span className="font-mono text-[11px]">{v}</span>} />
+      </Field>
+      <Field label="ID del recurso" hint="vpc-…, sg-…, i-…, ARN">
+        <TextInput value={el.resource ?? ''} onChange={(e) => update({ resource: e.target.value.trim() ? e.target.value : null }, 'resource')} placeholder="Opcional" className="font-mono text-[12px]" />
+      </Field>
+    </>
+  );
+}
+
+/** Resumen de `NetworkFields`: `10.20.0.0/16 +2 · vpc-0a1b`. */
+export function networkSummary(el: DeploymentElement): string {
+  const addresses = el.addresses ?? [];
+  return summarize(addresses.length ? `${addresses[0]}${addresses.length > 1 ? ` +${addresses.length - 1}` : ''}` : undefined, el.resource);
 }
 
 function InstanceFields({ el, update }: { el: Extract<Element, { kind: 'instance' }>; update: Update }) {
@@ -132,4 +166,3 @@ function InstanceFields({ el, update }: { el: Extract<Element, { kind: 'instance
     </>
   );
 }
-

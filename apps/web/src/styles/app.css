@@ -187,6 +187,29 @@
   font-family: var(--font-mono);
 }
 
+/* Aclaración a la derecha de una opción (texto, no un atajo). */
+.menu-item .menu-hint {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.menu-item .menu-hint + svg {
+  margin-left: -2px;
+}
+
+.menu-note {
+  max-width: 250px;
+  margin-top: 4px;
+  padding: 7px 8px 5px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-subtle);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
 .menu-sep {
   height: 1px;
   margin: 4px 2px;
@@ -383,4 +406,74 @@
   padding: 8px 10px;
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-sm);
+}
+
+/* Estado de elementos y relaciones ---------------------------------------------------------------- */
+/*
+ * Un color por estado, el mismo en el lienzo, los menús, el inspector y la exportación: verde es
+ * nuevo, ámbar se modifica, rojo se da de baja y gris ya no está. Lo que existe y no cambia no
+ * lleva color.
+ */
+[data-status='planned'] {
+  --status: var(--ok);
+}
+[data-status='changing'] {
+  --status: var(--warn);
+}
+[data-status='deprecated'] {
+  --status: var(--danger);
+}
+[data-status='retired'] {
+  --status: var(--fg-subtle);
+}
+
+.status-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--status, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--status, var(--fg-subtle));
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 23px;
+  padding: 0 9px 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+
+.status-chip:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.status-chip:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+.status-chip:is([data-status='planned'], [data-status='changing'], [data-status='deprecated']) {
+  color: var(--status);
+  border-color: color-mix(in srgb, var(--status) 45%, var(--line));
+  background: color-mix(in srgb, var(--status) 9%, transparent);
+}
+
+.status-chip:is([data-status='planned'], [data-status='changing'], [data-status='deprecated']):hover {
+  background: color-mix(in srgb, var(--status) 16%, transparent);
+  color: var(--status);
 }

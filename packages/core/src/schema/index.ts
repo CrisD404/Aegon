@@ -25,7 +25,11 @@ export const DEPLOYMENT_KINDS = ['node', 'infra', 'instance'] as const;
 export const ElementKind = z.enum(ELEMENT_KINDS);
 export type ElementKind = z.infer<typeof ElementKind>;
 
-export const STATUSES = ['planned', 'live', 'deprecated', 'retired'] as const;
+/**
+ * Qué pasa con el elemento: `planned` es nuevo (todavía no existe), `live` ya existe, `changing`
+ * existe y se modifica, `deprecated` se da de baja y `retired` ya no está.
+ */
+export const STATUSES = ['planned', 'live', 'changing', 'deprecated', 'retired'] as const;
 export const Status = z.enum(STATUSES);
 export type Status = z.infer<typeof Status>;
 
@@ -103,10 +107,18 @@ const softwareFields = {
   risk: Risk.optional(),
 };
 
+/** Datos para el simulador de carga. Todo es opcional: lo que falta se supone por tipo. */
+export const LoadProfile = z.object({
+  /** Pedidos por segundo que atiende una réplica. */
+  capacity: z.number().positive().optional(),
+});
+export type LoadProfile = z.infer<typeof LoadProfile>;
+
 export const System = z.object({
   ...baseElement,
   ...softwareFields,
   kind: z.literal('system'),
+  load: LoadProfile.optional(),
 });
 export type System = z.infer<typeof System>;
 
@@ -128,6 +140,7 @@ export const Container = z.object({
   ...softwareFields,
   kind: z.literal('container'),
   containerType: ContainerType.optional(),
+  load: LoadProfile.optional(),
 });
 export type Container = z.infer<typeof Container>;
 
@@ -173,6 +186,7 @@ export const Store = z.object({
   kind: z.literal('store'),
   risk: Risk.optional(),
   store: StoreDetails,
+  load: LoadProfile.optional(),
 });
 export type Store = z.infer<typeof Store>;
 
@@ -198,6 +212,7 @@ export const Bus = z.object({
   kind: z.literal('bus'),
   risk: Risk.optional(),
   bus: BusDetails,
+  load: LoadProfile.optional(),
 });
 export type Bus = z.infer<typeof Bus>;
 
@@ -351,16 +366,46 @@ export type ElementOf<K extends ElementKind> = Extract<Element, { kind: K }>;
 export const Direction = z.enum(['outgoing', 'bidirectional']);
 export type Direction = z.infer<typeof Direction>;
 
+const Port = z.number().int().min(1).max(65535);
+
+/** Un protocolo de una relación con los puertos de destino por los que va. */
+export const ProtocolUse = z.object({ id: z.string().min(1), ports: z.array(Port).min(1) });
+export type ProtocolUse = z.infer<typeof ProtocolUse>;
+
+const Protocols = z.array(z.union([z.string().min(1), ProtocolUse]));
+
+/**
+ * Lo que va en el otro sentido de una relación bidireccional (de `to` hacia `from`): su propia
+ * etiqueta y sus protocolos, con los puertos por los que escucha `from`.
+ */
+export const RelationBack = z.object({
+  label: z.string().optional(),
+  protocols: Protocols.optional(),
+  ports: z.array(Port).optional(),
+});
+export type RelationBack = z.infer<typeof RelationBack>;
+
 export const Relation = z.object({
   id: Id,
   from: Id,
   to: Id,
   label: z.string().optional(),
   description: z.string().optional(),
-  /** Protocolos de la comunicación (catálogo `PROTOCOLS`: `https`, `grpc`, `jdbc`, `kafka`…). */
-  protocols: z.array(z.string()).optional(),
-  /** Puertos de destino (`443`, `8080`). */
-  ports: z.array(z.number().int().min(1).max(65535)).optional(),
+  /**
+   * Protocolos de la comunicación (catálogo `PROTOCOLS`: `https`, `grpc`, `jdbc`, `kafka`…). Cada
+   * uno es su ID o, para decir por qué puertos va, `{ id: dns, ports: [53] }`. En una relación
+   * bidireccional son los de la ida (de `from` hacia `to`); los de la vuelta van en `back`.
+   */
+  protocols: Protocols.optional(),
+  /** Puertos de destino que no están asignados a un protocolo (`443`, `8080`). */
+  ports: z.array(Port).optional(),
+  /** Solo en una relación bidireccional: etiqueta y protocolos del sentido contrario. */
+  back: RelationBack.optional(),
+  /**
+   * Simulador de carga: llamadas al destino por cada pedido que atiende el origen. Por defecto 1
+   * (cada pedido lo usa); 0.5 es uno de cada dos y 3 es tres llamadas por pedido.
+   */
+  calls: z.number().nonnegative().optional(),
   /** Por defecto `outgoing`. */
   direction: Direction.optional(),
   status: Status.optional(),
@@ -387,9 +432,40 @@ export type NodeLayout = z.infer<typeof NodeLayout>;
 export const EdgeShape = z.enum(['curved', 'straight', 'step']);
 export type EdgeShape = z.infer<typeof EdgeShape>;
 
+/** Punto del lienzo (coordenadas absolutas, como las de los nodos). */
+export const EdgePoint = z.object({ x: z.number(), y: z.number() });
+export type EdgePoint = z.infer<typeof EdgePoint>;
+
+export const EDGE_SIDES = ['top', 'right', 'bottom', 'left'] as const;
+export const EdgeSide = z.enum(EDGE_SIDES);
+export type EdgeSide = z.infer<typeof EdgeSide>;
+
+/**
+ * Dónde toca una flecha a un elemento: el lado y la posición sobre ese lado, de 0 a 1 (de izquierda
+ * a derecha o de arriba hacia abajo). Sin `at`, al medio.
+ */
+export const EdgeAnchor = z.object({ side: EdgeSide, at: z.number().min(0).max(1).optional() });
+export type EdgeAnchor = z.infer<typeof EdgeAnchor>;
+
 export const EdgeStyle = z.object({
   shape: EdgeShape.optional(),
   hidden: z.boolean().optional(),
+  /** Punta fija en el origen: la flecha sale de ese lado en vez del que elige el lienzo. */
+  from: EdgeAnchor.optional(),
+  /** Punta fija en el destino. */
+  to: EdgeAnchor.optional(),
+  /**
+   * Recorrido acomodado a mano: la flecha pasa por estos puntos, en orden, entre el origen y el
+   * destino. Sin el campo, el lienzo la traza sola.
+   */
+  points: z.array(EdgePoint).max(32).optional(),
+  /**
+   * Etiqueta movida a mano: a qué altura del trazo va (0 = origen, 1 = destino). Sin el campo, la
+   * ubica el lienzo donde no tape nada.
+   */
+  labelAt: z.number().min(0).max(1).optional(),
+  /** Lo mismo para la etiqueta de la vuelta de una relación bidireccional. */
+  backLabelAt: z.number().min(0).max(1).optional(),
 });
 export type EdgeStyle = z.infer<typeof EdgeStyle>;
 
@@ -409,6 +485,16 @@ export const View = z.object({
   nodes: z.record(Id, NodeLayout),
   /** Estilo por relación (solo para las que se apartan del default). */
   edges: z.record(Id, EdgeStyle).optional(),
+  /**
+   * Sistemas o contenedores que este lienzo muestra abiertos en el lugar: un marco con sus hijos
+   * adentro. Así un mismo lienzo puede mostrar varios niveles C4 a la vez.
+   */
+  expanded: z.array(Id).optional(),
+  /**
+   * Disposición de lo que contiene un elemento cerrado, relativa a su esquina, para volver a
+   * abrirlo como estaba. Clave: ID del elemento cerrado.
+   */
+  folded: z.record(Id, z.record(Id, NodeLayout)).optional(),
   extensions: Extensions.optional(),
 });
 export type View = z.infer<typeof View>;
@@ -448,6 +534,11 @@ export const WorkspaceMeta = z.object({
   date: z.string().optional(),
   /** Lienzo que se abre por defecto. */
   defaultView: Id.optional(),
+  /**
+   * C4 estricto: avisa cuando un lienzo mezcla niveles (un componente en un lienzo de contexto).
+   * Por defecto está apagado: cada lienzo puede mostrar lo que haga falta.
+   */
+  strictC4: z.boolean().optional(),
   environments: z.array(Environment).optional(),
   finops: FinOpsSettings.optional(),
   extensions: Extensions.optional(),

@@ -1,6 +1,6 @@
-import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { forwardRef, useEffect, useId, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import { Switch as RSwitch, Tooltip } from 'radix-ui';
-import { X } from 'lucide-react';
+import { ChevronRight, X } from 'lucide-react';
 
 export function cn(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ');
@@ -270,5 +270,127 @@ export function SectionTitle({ children, action }: { children: ReactNode; action
       <h3 className="text-[11px] font-semibold tracking-[0.04em] text-fg-subtle uppercase">{children}</h3>
       {action}
     </div>
+  );
+}
+
+/* Secciones plegables ------------------------------------------------------------------------- */
+
+/**
+ * Qué secciones eligió ver abiertas o cerradas el usuario (clave: nombre de la sección). La
+ * elección vale para esa sección en cualquier elemento y se recuerda entre sesiones; mientras no
+ * elija, cada sección se abre sola si tiene datos.
+ */
+const SECTIONS_KEY = 'aegon.sections';
+
+function loadSectionChoices(): Record<string, boolean> {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? '{}');
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return Object.fromEntries(Object.entries(raw).filter(([, open]) => typeof open === 'boolean')) as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+let sectionChoices = loadSectionChoices();
+const sectionListeners = new Set<() => void>();
+
+function subscribeSections(listener: () => void) {
+  sectionListeners.add(listener);
+  return () => {
+    sectionListeners.delete(listener);
+  };
+}
+
+function chooseSection(id: string, open: boolean) {
+  sectionChoices = { ...sectionChoices, [id]: open };
+  try {
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify(sectionChoices));
+  } catch {
+    // Modo privado o almacenamiento bloqueado: la elección vale solo para esta sesión.
+  }
+  for (const listener of sectionListeners) listener();
+}
+
+/** `Operación` → `operacion`, `Costos y ambientes` → `costos-y-ambientes`. */
+export function sectionId(title: string): string {
+  return title
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/** Une las partes que tienen algo: `summarize('Alto', undefined, '2 tags')` → `Alto · 2 tags`. */
+export function summarize(...parts: (string | number | false | null | undefined)[]): string {
+  return parts.filter((p) => p !== false && p !== null && p !== undefined && p !== '').join(' · ');
+}
+
+/** `plural(1, 'link')` → `1 link`; `plural(3, 'link')` → `3 links`. */
+export function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * Sección plegable: cerrada es una sola fila con el nombre y un resumen de lo que contiene.
+ * Se abre sola si tiene datos (`filled`); cuando el usuario la abre o la cierra, esa elección
+ * manda para todas las secciones con el mismo nombre.
+ */
+export function Section({
+  title,
+  id = sectionId(title),
+  summary,
+  filled = Boolean(summary),
+  action,
+  children,
+}: {
+  title: string;
+  /** Clave de la elección y del `data-testid`; por defecto sale del título. */
+  id?: string;
+  /** Lo que contiene, en pocas palabras; se muestra con la sección cerrada. */
+  summary?: string;
+  /** Si tiene datos (abierta por defecto). Sin indicarlo, vale tener resumen. */
+  filled?: boolean;
+  /** Acción del encabezado (agregar, configurar); visible con la sección abierta. */
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  const choice = useSyncExternalStore(
+    subscribeSections,
+    () => sectionChoices[id],
+    () => undefined,
+  );
+  const open = choice ?? filled;
+  const contentId = useId();
+  return (
+    <section className="border-t border-line">
+      <div className="flex h-9 items-center gap-1">
+        <h3 className="flex min-w-0 flex-1">
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={open ? contentId : undefined}
+            onClick={() => chooseSection(id, !open)}
+            onKeyDown={(e) => {
+              // Enter y Espacio son de este botón: que no los tomen antes los atajos globales del lienzo.
+              if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+            }}
+            className="group flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-xs text-left text-[12.5px] font-normal"
+            data-testid={`section-${id}`}
+          >
+            <ChevronRight size={13} strokeWidth={2} className={cn('shrink-0 text-fg-subtle transition-transform duration-150 group-hover:text-fg', open && 'rotate-90')} />
+            <span className={cn('shrink-0 font-medium transition-colors group-hover:text-fg', open ? 'text-fg' : 'text-fg-muted')}>{title}</span>
+            {!open && summary ? <span className="min-w-0 truncate text-fg-subtle">· {summary}</span> : null}
+          </button>
+        </h3>
+        {open ? action : null}
+      </div>
+      {open ? (
+        <div id={contentId} className="animate-fade flex flex-col gap-3.5 pt-1 pb-4">
+          {children}
+        </div>
+      ) : null}
+    </section>
   );
 }

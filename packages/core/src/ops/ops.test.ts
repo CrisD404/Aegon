@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { applyOp, OpError, type Op } from './index.ts';
-import { createElementOp, connectOp, duplicateOp, ensureChildViewOp, representativeInView } from './commands.ts';
+import { AUTO_ROUTE, createElementOp, connectOp, duplicateOp, edgeStyleWith, ensureChildViewOp, hasManualRoute, reconnectOp, representativeInView, routeResetOps, shiftEdgeStyle } from './commands.ts';
 import { sampleModel } from '../test-fixtures.ts';
 import { deepEqual } from '../diff/index.ts';
 import { childViewOf, descendantsOf } from '../model/index.ts';
+import { EdgeStyle } from '../schema/index.ts';
 
 function roundtrip(op: Op) {
   const model = sampleModel();
@@ -27,6 +28,7 @@ describe('applyOp + inverse', () => {
     ['view.place', { type: 'view.place', view: 'landscape', nodes: { banking: { x: 10, y: 10 }, 'core-gw': { x: 5, y: 5 } } }],
     ['view.unplace', { type: 'view.unplace', view: 'landscape', ids: ['core', 'missing'] }],
     ['view.edge', { type: 'view.edge', view: 'banking-containers', relation: 'web--api', style: null }],
+    ['view.edge (recorrido a mano)', { type: 'view.edge', view: 'banking-containers', relation: 'web--api', style: { shape: 'step', points: [{ x: 40, y: -60 }, { x: 300, y: -60 }] } }],
     ['workspace.update', { type: 'workspace.update', patch: { description: 'hola', defaultView: null } }],
   ];
 
@@ -166,5 +168,145 @@ describe('comandos', () => {
     expect(next.relations['web-copia--api-copia']).toBeDefined();
     expect(next.views['banking-containers']!.nodes['api-copia']).toEqual({ x: 368, y: 48 });
     expect(descendantsOf(next, 'banking')).toContain('api-copia');
+  });
+});
+
+describe('recorrido a mano de una relación', () => {
+  const routed = () => {
+    const model = sampleModel();
+    const view = model.views['banking-containers']!;
+    const style = edgeStyleWith(view, 'web--api', { points: [{ x: 40, y: -60 }, { x: 300, y: -60 }] });
+    return applyOp(model, { type: 'view.edge', view: view.id, relation: 'web--api', style }).model;
+  };
+
+  it('cambiar un campo del estilo conserva los demás', () => {
+    const view = routed().views['banking-containers']!;
+    const before = view.edges!['web--api']!;
+    expect(before.points).toHaveLength(2);
+    // Cambiar la forma no borra el recorrido, y volver a la forma por defecto tampoco.
+    expect(edgeStyleWith(view, 'web--api', { shape: 'straight' })).toEqual({ ...before, shape: 'straight' });
+    const curved = edgeStyleWith(view, 'web--api', { shape: 'curved' })!;
+    expect(curved.shape).toBeUndefined();
+    expect(curved.points).toEqual(before.points);
+  });
+
+  it('sin nada distinto del default no queda entrada', () => {
+    const view = sampleModel().views['banking-containers']!;
+    expect(edgeStyleWith({ ...view, edges: {} }, 'web--api', { shape: 'curved', points: [], hidden: false })).toBeNull();
+    expect(edgeStyleWith({ ...view, edges: { 'web--api': { points: [{ x: 1, y: 2 }] } } }, 'web--api', { points: null })).toBeNull();
+  });
+
+  it('el recorrido se corre entero con lo que une', () => {
+    expect(shiftEdgeStyle({ shape: 'step', points: [{ x: 10, y: 20 }] }, 5, -5)).toEqual({ shape: 'step', points: [{ x: 15, y: 15 }] });
+    const plain = { shape: 'step' as const };
+    expect(shiftEdgeStyle(plain, 5, 5)).toBe(plain);
+  });
+
+  it('reordenar quita el recorrido de lo que se movió y deja el resto', () => {
+    const model = routed();
+    const view = model.views['banking-containers']!;
+    expect(routeResetOps(model, view, new Set(['db']))).toEqual([]);
+    const ops = routeResetOps(model, view, new Set(['web']));
+    expect(ops).toHaveLength(1);
+    const next = applyOp(model, ops[0]!).model.views['banking-containers']!;
+    expect(next.edges?.['web--api']?.points).toBeUndefined();
+    expect(routeResetOps(model, view)).toHaveLength(1);
+  });
+});
+
+describe('puntas fijas de una relación', () => {
+  const view = () => sampleModel().views['banking-containers']!;
+
+  it('el medio del lado es el default y no se escribe', () => {
+    expect(edgeStyleWith({ ...view(), edges: {} }, 'web--api', { to: { side: 'top', at: 0.5 } })).toEqual({ to: { side: 'top' } });
+    expect(edgeStyleWith({ ...view(), edges: {} }, 'web--api', { from: { side: 'bottom', at: 0.25 } })).toEqual({ from: { side: 'bottom', at: 0.25 } });
+  });
+
+  it('una punta se fija o se suelta sin tocar la otra ni el recorrido', () => {
+    const v = view();
+    const style = edgeStyleWith(v, 'web--api', { from: { side: 'bottom' }, to: { side: 'left', at: 0.2 }, points: [{ x: 10, y: 90 }] })!;
+    const with2 = { ...v, edges: { 'web--api': style } };
+    expect(edgeStyleWith(with2, 'web--api', { to: null })).toEqual({ shape: 'straight', from: { side: 'bottom' }, points: [{ x: 10, y: 90 }] });
+    expect(hasManualRoute(style)).toBe(true);
+    // Volver al automático deja solo lo que no es recorrido (la forma).
+    expect(edgeStyleWith(with2, 'web--api', AUTO_ROUTE)).toEqual({ shape: 'straight' });
+    expect(hasManualRoute({ shape: 'straight' })).toBe(false);
+    expect(hasManualRoute(undefined)).toBe(false);
+  });
+
+  it('la etiqueta movida a mano se guarda en el lienzo y vuelve sola con el resto', () => {
+    const v = view();
+    const style = edgeStyleWith(v, 'web--api', { labelAt: 0.25 })!;
+    expect(style).toEqual({ shape: 'straight', labelAt: 0.25 });
+    expect(hasManualRoute(style)).toBe(true);
+    const moved = { ...v, edges: { 'web--api': { ...style, backLabelAt: 0.8 } } };
+    // Volver al automático suelta también las etiquetas.
+    expect(edgeStyleWith(moved, 'web--api', AUTO_ROUTE)).toEqual({ shape: 'straight' });
+    // Fuera del trazo no hay etiqueta: el formato lo rechaza.
+    expect(EdgeStyle.safeParse({ labelAt: 1.4 }).success).toBe(false);
+    expect(EdgeStyle.safeParse({ labelAt: 0.4, backLabelAt: 0.9 }).success).toBe(true);
+    expect(applyOp(sampleModel(), { type: 'view.edge', view: v.id, relation: 'web--api', style: { labelAt: 0.4 } }).model.views[v.id]!.edges!['web--api']).toEqual({ labelAt: 0.4 });
+  });
+
+  it('reordenar también suelta las puntas de lo que se movió', () => {
+    const base = sampleModel();
+    const model = applyOp(base, { type: 'view.edge', view: 'banking-containers', relation: 'web--api', style: { to: { side: 'top' } } }).model;
+    const ops = routeResetOps(model, model.views['banking-containers']!, new Set(['api']));
+    expect(ops).toHaveLength(1);
+    expect(applyOp(model, ops[0]!).model.views['banking-containers']!.edges?.['web--api']).toBeUndefined();
+  });
+});
+
+describe('llevar una flecha a otro elemento', () => {
+  it('cambia ese extremo y conserva el ID y lo demás de la relación', () => {
+    const base = sampleModel();
+    const model = applyOp(base, { type: 'relation.update', id: 'web--api', patch: { label: 'Consulta', protocols: ['https'], ports: [443] } }).model;
+    const result = reconnectOp(model, 'web--api', 'to', 'db');
+    if (!result || 'problem' in result) throw new Error('se esperaba una operación');
+    const { model: next, inverse } = applyOp(model, result.op);
+    expect(next.relations['web--api']).toMatchObject({ id: 'web--api', from: 'web', to: 'db', label: 'Consulta', protocols: ['https'], ports: [443] });
+    expect(deepEqual(applyOp(next, inverse).model, model)).toBe(true);
+  });
+
+  it('suelta lo acomodado a mano para el recorrido viejo, menos la punta que no se movió', () => {
+    const base = sampleModel();
+    const model = applyOp(base, {
+      type: 'view.edge',
+      view: 'banking-containers',
+      relation: 'web--api',
+      style: { shape: 'straight', from: { side: 'bottom' }, to: { side: 'top' }, points: [{ x: 10, y: 90 }] },
+    }).model;
+    const result = reconnectOp(model, 'web--api', 'to', 'db');
+    if (!result || 'problem' in result) throw new Error('se esperaba una operación');
+    expect(applyOp(model, result.op).model.views['banking-containers']!.edges!['web--api']).toEqual({ shape: 'straight', from: { side: 'bottom' } });
+  });
+
+  it('no deja dos relaciones para el mismo par ni una que vuelva sobre sí misma', () => {
+    const model = sampleModel();
+    // `customer` ya está conectado con `web`: llevar ahí la punta de `web--api` duplicaría el par.
+    expect(reconnectOp(model, 'web--api', 'to', 'customer')).toMatchObject({ problem: expect.stringContaining('ya están conectados') });
+    expect(reconnectOp(model, 'web--api', 'from', 'api')).toMatchObject({ problem: expect.stringContaining('dos extremos distintos') });
+    expect(reconnectOp(model, 'web--api', 'to', 'aws')).toMatchObject({ problem: expect.stringContaining('grupo') });
+    expect(reconnectOp(model, 'web--api', 'to', 'api')).toBeNull();
+  });
+
+  it('los pasos de flujos que van por esa relación siguen al extremo nuevo', () => {
+    const base = sampleModel();
+    const model = applyOp(base, {
+      type: 'flow.add',
+      flow: {
+        id: 'saldo',
+        name: 'Consulta de saldo',
+        steps: [
+          { type: 'message', from: 'web', to: 'api', relation: 'web--api' },
+          { type: 'paths', mode: 'alternate', paths: [{ name: 'Con caché', steps: [{ type: 'message', from: 'api', to: 'web', relation: 'web--api' }, { type: 'process', element: 'api' }] }] },
+        ],
+      },
+    }).model;
+    const result = reconnectOp(model, 'web--api', 'to', 'core');
+    if (!result || 'problem' in result) throw new Error('se esperaba una operación');
+    const steps = applyOp(model, result.op).model.flows!.saldo!.steps;
+    expect(steps[0]).toMatchObject({ from: 'web', to: 'core' });
+    expect(steps[1]).toMatchObject({ paths: [{ steps: [{ from: 'core', to: 'web' }, { type: 'process', element: 'api' }] }] });
   });
 });

@@ -30,7 +30,35 @@
     "protocols": {
       "type": "array",
       "items": {
-        "type": "string"
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "ports": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                }
+              }
+            },
+            "required": [
+              "id",
+              "ports"
+            ],
+            "additionalProperties": false
+          }
+        ]
       }
     },
     "ports": {
@@ -40,6 +68,61 @@
         "minimum": 1,
         "maximum": 65535
       }
+    },
+    "back": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "protocols": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "ports": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "ports"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "calls": {
+      "type": "number",
+      "minimum": 0
     },
     "direction": {
       "type": "string",
@@ -53,6 +136,7 @@
       "enum": [
         "planned",
         "live",
+        "changing",
         "deprecated",
         "retired"
       ]

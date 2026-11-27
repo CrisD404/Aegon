@@ -14,6 +14,62 @@ describe('serialize / parse', () => {
     expect(deepEqual(parsed, model)).toBe(true);
   });
 
+  it('el recorrido a mano de una flecha va y vuelve, en una línea', () => {
+    const base = sampleModel();
+    const { model } = applyOp(base, { type: 'view.edge', view: 'banking-containers', relation: 'web--api', style: { points: [{ x: 40, y: -60 }, { x: 300, y: -60 }] } });
+    const files = serializeWorkspace(model);
+    expect(files.get('views/banking-containers.yaml')).toContain('web--api: { points: [ { x: 40, y: -60 }, { x: 300, y: -60 } ] }');
+    const { model: parsed, diagnostics } = parseWorkspace(files);
+    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(deepEqual(parsed, model)).toBe(true);
+  });
+
+  it('los protocolos con sus puertos van y vuelven, uno por renglón', () => {
+    const base = sampleModel();
+    const { model } = applyOp(base, { type: 'relation.update', id: 'web--api', patch: { protocols: [{ id: 'dns', ports: [53] }, { id: 'ldap', ports: [389, 636] }, 'https'], ports: [8080] } });
+    const files = serializeWorkspace(model);
+    const yaml = files.get('model/relations/web--api.yaml')!;
+    expect(yaml).toContain(['protocols:', '  - id: dns', '    ports: [ 53 ]', '  - id: ldap', '    ports: [ 389, 636 ]', '  - https', 'ports: [ 8080 ]'].join('\n'));
+    const { model: parsed, diagnostics } = parseWorkspace(files);
+    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(deepEqual(parsed, model)).toBe(true);
+  });
+
+  it('la vuelta de una relación bidireccional va y vuelve, después de la dirección', () => {
+    const base = sampleModel();
+    const { model } = applyOp(base, {
+      type: 'relation.update',
+      id: 'web--api',
+      patch: { direction: 'bidirectional', protocols: [{ id: 'https', ports: [443] }], back: { protocols: [{ id: 'amqp', ports: [5672] }], label: 'Avisa cambios' } },
+    });
+    const files = serializeWorkspace(model);
+    const yaml = files.get('model/relations/web--api.yaml')!;
+    expect(yaml).toContain(['direction: bidirectional', 'back:', '  label: Avisa cambios', '  protocols:', '    - id: amqp', '      ports: [ 5672 ]'].join('\n'));
+    const { model: parsed, diagnostics } = parseWorkspace(files);
+    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(deepEqual(parsed, model)).toBe(true);
+  });
+
+  it('la etiqueta movida a mano va y vuelve', () => {
+    const base = sampleModel();
+    const { model } = applyOp(base, { type: 'view.edge', view: 'banking-containers', relation: 'web--api', style: { shape: 'straight', labelAt: 0.25, backLabelAt: 0.8 } });
+    const files = serializeWorkspace(model);
+    expect(files.get('views/banking-containers.yaml')).toContain('web--api: { shape: straight, labelAt: 0.25, backLabelAt: 0.8 }');
+    const { model: parsed, diagnostics } = parseWorkspace(files);
+    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(deepEqual(parsed, model)).toBe(true);
+  });
+
+  it('las puntas fijas de una flecha van y vuelven', () => {
+    const base = sampleModel();
+    const { model } = applyOp(base, { type: 'view.edge', view: 'banking-containers', relation: 'web--api', style: { from: { side: 'bottom' }, to: { side: 'left', at: 0.25 } } });
+    const files = serializeWorkspace(model);
+    expect(files.get('views/banking-containers.yaml')).toContain('web--api: { from: { side: bottom }, to: { side: left, at: 0.25 } }');
+    const { model: parsed, diagnostics } = parseWorkspace(files);
+    expect(diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(deepEqual(parsed, model)).toBe(true);
+  });
+
   it('es determinista y estable (serializar dos veces da lo mismo)', () => {
     const model = sampleModel();
     const a = serializeWorkspace(model);

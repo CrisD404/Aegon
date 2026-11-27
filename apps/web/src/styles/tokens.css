@@ -65,6 +65,8 @@
   --ok: #1f9d63;
   --warn: #b7860b;
   --danger: #d93b45;
+  /* Texto sobre una etiqueta de estado (fondo del color del estado). */
+  --status-ink: #ffffff;
 
   --kind-actor: #b4568a;
   --kind-system: #3d5afe;
@@ -130,6 +132,7 @@
   --ok: #4cc38a;
   --warn: #e3b341;
   --danger: #f2555a;
+  --status-ink: #0b0e14;
 
   --kind-actor: #e58fbf;
   --kind-system: #8aa2ff;

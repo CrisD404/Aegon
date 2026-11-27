@@ -11,7 +11,9 @@ import {
   AlignVerticalDistributeCenter,
   ArrowRightLeft,
   BookmarkPlus,
+  Check,
   ChevronRight,
+  CircleDot,
   ClipboardPaste,
   Copy,
   CopyPlus,
@@ -23,25 +25,31 @@ import {
   Maximize,
   Pencil,
   Plus,
+  Redo2,
   Spline,
   Trash2,
   Wand2,
   Server,
+  SquareArrowOutUpRight,
 } from 'lucide-react';
-import type { EdgeShape, Id } from '@aegon/core';
+import { STATUS_HINT, STATUS_LABEL, canExpandInView, edgeStyleWith, hasManualRoute, invertRelationPatch, isExpandedInView, relationStatusOf, statusOf, type EdgeShape, type Id, type Status } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import {
   alignSelection,
   arrange,
   copySelection,
-  deleteSelectionFromModel,
+  deleteSelection,
   distributeSelection,
   drillInto,
   duplicateSelection,
   paste,
   removeSelectionFromView,
+  resetRoute,
+  setSelectionStatus,
+  toggleExpand,
 } from '../lib/actions.ts';
+import { STATUS_MENU, StatusDot } from '../ui/StatusPicker.tsx';
 import { openNewDeploymentView, openTemplates, saveSelectionAsTemplate } from '../lib/flows.tsx';
 import { IMPLIED_PREFIX } from './derive.ts';
 import { addStep } from '../lib/flow-actions.ts';
@@ -91,6 +99,31 @@ function AlignSubmenu() {
   );
 }
 
+/** Estado de lo seleccionado: qué es nuevo, qué se modifica y qué se da de baja. */
+function StatusSubmenu({ current }: { current?: Status }) {
+  return (
+    <ContextMenu.Sub>
+      <ContextMenu.SubTrigger className="menu-item" data-testid="ctx-status">
+        <CircleDot size={14} />
+        Estado
+        <ChevronRight size={13} className="ml-auto" />
+      </ContextMenu.SubTrigger>
+      <ContextMenu.Portal>
+        <ContextMenu.SubContent className="menu min-w-[250px]" sideOffset={4}>
+          {STATUS_MENU.map((status) => (
+            <ContextMenu.Item key={status} className="menu-item" onSelect={() => setSelectionStatus(status)} data-testid={`ctx-status-${status}`}>
+              <StatusDot status={status} />
+              {STATUS_LABEL[status]}
+              <span className="menu-hint">{STATUS_HINT[status]}</span>
+              {current === status ? <Check size={13} className="text-accent" /> : null}
+            </ContextMenu.Item>
+          ))}
+        </ContextMenu.SubContent>
+      </ContextMenu.Portal>
+    </ContextMenu.Sub>
+  );
+}
+
 export function CanvasContextMenu({ target, children, onOpenGhost }: { target: ContextTarget; children: ReactNode; onOpenGhost: (clientX: number, clientY: number) => void }) {
   const model = useWorkspace((s) => s.model);
   const dispatch = useWorkspace((s) => s.dispatch);
@@ -106,7 +139,7 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
   });
 
   const setShape = (shape: EdgeShape) => {
-    if (view && rel) dispatch({ type: 'view.edge', view: view.id, relation: rel.id, style: shape === 'curved' ? null : { ...view.edges?.[rel.id], shape } }, { label: 'Forma de la relación' });
+    if (view && rel) dispatch({ type: 'view.edge', view: view.id, relation: rel.id, style: edgeStyleWith(view, rel.id, { shape }) }, { label: 'Forma de la relación' });
   };
 
   let content: ReactNode;
@@ -116,13 +149,14 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
         <div className="menu-label">{selection.nodes.length} seleccionados</div>
         <AlignSubmenu />
         <Item icon={<Wand2 size={14} />} shortcut="⇧L" onSelect={arrange}>Ordenar selección</Item>
+        <StatusSubmenu />
         <ContextMenu.Separator className="menu-sep" />
         <Item icon={<CopyPlus size={14} />} shortcut="Ctrl D" onSelect={duplicateSelection}>Duplicar</Item>
         <Item icon={<Copy size={14} />} shortcut="Ctrl C" onSelect={copySelection}>Copiar</Item>
         <Item icon={<BookmarkPlus size={14} />} onSelect={() => void saveSelectionAsTemplate()}>Guardar como template…</Item>
         <ContextMenu.Separator className="menu-sep" />
-        <Item icon={<EyeOff size={14} />} shortcut="Supr" onSelect={removeSelectionFromView}>Quitar del lienzo</Item>
-        <Item icon={<Trash2 size={14} />} shortcut="⇧ Supr" onSelect={deleteSelectionFromModel} danger>Eliminar del modelo</Item>
+        <Item icon={<EyeOff size={14} />} onSelect={removeSelectionFromView}>Quitar de este lienzo</Item>
+        <Item icon={<Trash2 size={14} />} shortcut="Supr" onSelect={deleteSelection} danger>Eliminar</Item>
       </>
     );
   } else if (target.type === 'node' && el) {
@@ -130,16 +164,21 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
     content = (
       <>
         <div className="menu-label">{el.name}</div>
+        {canDrill && view && canExpandInView(model, view, el.id) ? (
+          <Item icon={<Layers size={14} />} shortcut="↵" onSelect={() => toggleExpand(el.id)}>
+            {isExpandedInView(view, el.id) ? 'Cerrar' : el.kind === 'system' ? 'Abrir acá sus contenedores' : 'Abrir acá sus componentes'}
+          </Item>
+        ) : null}
         {canDrill ? (
           <Item
-            icon={<Layers size={14} />}
-            shortcut="↵"
+            icon={<SquareArrowOutUpRight size={14} />}
+            shortcut="Alt ↵"
             onSelect={async () => {
               await canvasApi.zoomToNode(el.id);
               drillInto(el.id);
             }}
           >
-            {el.kind === 'system' ? 'Abrir contenedores (L2)' : 'Abrir componentes (L3)'}
+            Abrir en un lienzo aparte
           </Item>
         ) : null}
         {el.kind === 'system' && el.scope !== 'external' ? (
@@ -157,6 +196,7 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
           </>
         ) : null}
         <Item icon={<Pencil size={14} />} shortcut="F2" onSelect={() => useUi.getState().requestRename()}>Renombrar</Item>
+        <StatusSubmenu current={statusOf(model, el.id).status} />
         <Item icon={<CopyPlus size={14} />} shortcut="Ctrl D" onSelect={duplicateSelection} disabled={el.kind === 'group'}>Duplicar</Item>
         <Item icon={<Copy size={14} />} shortcut="Ctrl C" onSelect={copySelection}>Copiar</Item>
         <Item icon={<span className="w-[14px] font-mono text-[10px] text-fg-subtle">ID</span>} onSelect={() => void navigator.clipboard?.writeText(el.id)}>
@@ -180,8 +220,8 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
           Comentar
         </Item>
         <ContextMenu.Separator className="menu-sep" />
-        <Item icon={<EyeOff size={14} />} shortcut="Supr" onSelect={removeSelectionFromView}>Quitar del lienzo</Item>
-        <Item icon={<Trash2 size={14} />} shortcut="⇧ Supr" onSelect={deleteSelectionFromModel} danger>Eliminar del modelo</Item>
+        <Item icon={<EyeOff size={14} />} onSelect={removeSelectionFromView}>Quitar de este lienzo</Item>
+        <Item icon={<Trash2 size={14} />} shortcut="Supr" onSelect={deleteSelection} danger>Eliminar</Item>
       </>
     );
   } else if (target.type === 'edge') {
@@ -189,15 +229,16 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
       <>
         <div className="menu-label">Relación</div>
         <Item icon={<Pencil size={14} />} onSelect={() => useUi.getState().setRightTab('inspector')}>Editar</Item>
+        <StatusSubmenu current={relationStatusOf(model, rel).status} />
         {editingFlow ? (
           <Item icon={<Workflow size={14} />} onSelect={() => addStep(editingFlow.id, { type: 'message', from: rel.from, to: rel.to, relation: rel.id })}>
             Agregar al flujo «{editingFlow.name}»
           </Item>
         ) : null}
-        <Item icon={<ArrowRightLeft size={14} />} onSelect={() => dispatch({ type: 'relation.update', id: rel.id, patch: { from: rel.to, to: rel.from } }, { label: 'Invertir relación' })}>Invertir dirección</Item>
+        <Item icon={<ArrowRightLeft size={14} />} onSelect={() => dispatch({ type: 'relation.update', id: rel.id, patch: invertRelationPatch(rel) }, { label: 'Invertir relación' })}>Invertir dirección</Item>
         <Item
           icon={<ArrowRightLeft size={14} />}
-          onSelect={() => dispatch({ type: 'relation.update', id: rel.id, patch: { direction: rel.direction === 'bidirectional' ? null : 'bidirectional' } })}
+          onSelect={() => dispatch({ type: 'relation.update', id: rel.id, patch: rel.direction === 'bidirectional' ? { direction: null, ...(rel.back ? { back: null } : {}) } : { direction: 'bidirectional' } })}
         >
           {rel.direction === 'bidirectional' ? 'Hacer unidireccional' : 'Hacer bidireccional'}
         </Item>
@@ -215,6 +256,9 @@ export function CanvasContextMenu({ target, children, onOpenGhost }: { target: C
             </ContextMenu.SubContent>
           </ContextMenu.Portal>
         </ContextMenu.Sub>
+        {hasManualRoute(view?.edges?.[rel.id]) ? (
+          <Item icon={<Redo2 size={14} />} onSelect={() => resetRoute(rel.id)}>Volver al trazo automático</Item>
+        ) : null}
         <ContextMenu.Separator className="menu-sep" />
         <Item icon={<Trash2 size={14} />} shortcut="Supr" onSelect={() => dispatch({ type: 'relation.remove', id: rel.id }, { label: 'Eliminar relación' })} danger>
           Eliminar relación

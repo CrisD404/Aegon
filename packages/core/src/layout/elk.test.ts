@@ -54,7 +54,7 @@ describe('ELK', () => {
     const model = sampleModel();
     const edges = viewEdges(model, model.views['banking-containers']!);
     const call = edges.find((e) => e.relations[0]!.id === 'web--api')!;
-    expect(edgeLabelParts(call)).toEqual({ label: 'Llama', tech: 'HTTPS' });
+    expect(edgeLabelParts(call)).toEqual({ label: 'Llama', tech: 'HTTPS', techLines: ['HTTPS'] });
     const short = edgeLabelSize(call)!;
     expect(short.width).toBeLessThan(80);
     expect(short.height).toBeGreaterThan(30); // dos líneas: texto y protocolo

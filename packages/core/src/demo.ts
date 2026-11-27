@@ -1,7 +1,7 @@
 import { applyOps, type Op } from './ops/index.ts';
 import { emptyModel, type Model } from './model/index.ts';
 
-/** Workspace de ejemplo para el primer arranque: una banca digital con L1, L2 y L3. */
+/** Workspace de ejemplo para el primer arranque: una banca digital con L1, L2, L3 y el despliegue de producción. */
 export function demoModel(id = 'banca-digital'): Model {
   const el = (element: Extract<Op, { type: 'element.add' }>['element']): Op => ({ type: 'element.add', element });
   const rel = (relation: Extract<Op, { type: 'relation.add' }>['relation']): Op => ({ type: 'relation.add', relation });
@@ -129,6 +129,7 @@ export function demoModel(id = 'banca-digital'): Model {
       },
     },
     ...finops(),
+    ...deployment(),
     ...flowsAndComments(),
   ];
   return applyOps(emptyModel(id, 'Banca digital (demo)'), ops).model;
@@ -158,6 +159,81 @@ function finops(): Op[] {
     set('banking-db', { dev: { monthly: 70 }, qa: { monthly: 70 }, pre: { monthly: 420, sku: 'db.r6g.large' }, prod: { monthly: 1800, replicas: 2, sku: 'db.r6g.xlarge' } }),
     set('cache', { qa: { monthly: 30 }, pre: { monthly: 90 }, prod: { monthly: 260, sku: 'cache.r6g.large' } }, { environments: ['qa', 'pre', 'prod'] }),
     set('eventos', { dev: { monthly: 120 }, qa: { monthly: 120 }, pre: { monthly: 400 }, prod: { monthly: 1250, replicas: 3, sku: 'MSK kafka.m5.large' } }),
+  ];
+}
+
+/**
+ * Despliegue de producción de Home Banking: la SPA detrás de un CDN, la API en un clúster dentro
+ * de una subred privada, los datos administrados al lado y el core en el datacenter. Las
+ * relaciones lógicas (API → base, API → core) no se repiten: el lienzo las proyecta sobre las
+ * instancias.
+ */
+function deployment(): Op[] {
+  const prod = ['prod'];
+  const el = (element: Extract<Op, { type: 'element.add' }>['element']): Op => ({ type: 'element.add', element });
+  const rel = (relation: Extract<Op, { type: 'relation.add' }>['relation']): Op => ({ type: 'relation.add', relation });
+  const instance = (of: string, parent: string, replicas?: number): Op =>
+    el({ id: `${of}-prod`, kind: 'instance', name: '', parent, environments: prod, instance: replicas ? { of, replicas } : { of } });
+  const named = (op: Op, name: string): Op => (op.type === 'element.add' ? { ...op, element: { ...op.element, name } } : op);
+  return [
+    el({ id: 'celular', kind: 'node', name: 'Celular del cliente', node: { type: 'device' }, technology: ['flutter'], environments: prod }),
+    el({ id: 'aws-prod', kind: 'node', name: 'AWS · cuenta de producción', node: { type: 'cloud', provider: 'aws', region: 'us-east-1', account: 'banca-prod' }, environments: prod }),
+    el({ id: 'vpc-prod', kind: 'node', name: 'VPC producción', parent: 'aws-prod', node: { type: 'network', provider: 'aws' }, addresses: ['10.20.0.0/16'], environments: prod }),
+    el({ id: 'subnet-publica-prod', kind: 'node', name: 'Subred pública', parent: 'vpc-prod', node: { type: 'subnet', provider: 'aws' }, addresses: ['10.20.0.0/24'], environments: prod }),
+    el({ id: 'subnet-privada-prod', kind: 'node', name: 'Subred privada', parent: 'vpc-prod', node: { type: 'subnet', provider: 'aws' }, addresses: ['10.20.10.0/23'], environments: prod }),
+    el({ id: 'eks-prod', kind: 'node', name: 'Clúster de la banca', parent: 'subnet-privada-prod', node: { type: 'cluster', provider: 'kubernetes', size: 'm6i.xlarge', instances: 3 }, technology: ['kubernetes'], environments: prod, risk: 'high' }),
+    el({ id: 'dc-central', kind: 'node', name: 'Datacenter central', node: { type: 'datacenter', provider: 'onprem', region: 'Buenos Aires' } }),
+    el({ id: 'cdn-prod', kind: 'infra', name: 'CDN', parent: 'aws-prod', infra: { type: 'cdn' }, technology: ['cloudfront'], addresses: ['banca.example.com'], environments: prod }),
+    el({ id: 'alb-prod', kind: 'infra', name: 'Balanceador público', parent: 'subnet-publica-prod', infra: { type: 'load-balancer' }, technology: ['aws-alb'], addresses: ['api.banca.example.com:443'], environments: prod }),
+    named(instance('app-movil', 'celular'), 'App móvil'),
+    named(instance('web-app', 'aws-prod'), 'Web App'),
+    named(instance('api-gateway', 'eks-prod', 3), 'API Gateway'),
+    named(instance('cuentas-api', 'eks-prod', 4), 'Cuentas API'),
+    named(instance('pagos-api', 'eks-prod', 6), 'Pagos API'),
+    named(instance('banking-db', 'subnet-privada-prod', 2), 'Banking DB'),
+    named(instance('cache', 'subnet-privada-prod'), 'Caché de sesiones'),
+    named(instance('eventos', 'subnet-privada-prod', 3), 'Eventos de pagos'),
+    el({ id: 'core-bancario-prod', kind: 'instance', name: 'Core bancario', parent: 'dc-central', instance: { of: 'core-bancario' } }),
+
+    // El camino de red: lo que entra por internet pasa por el CDN y el balanceador.
+    rel({ id: 'cliente--cdn-prod', from: 'cliente', to: 'cdn-prod', label: 'Navega', protocols: ['https'], ports: [443] }),
+    rel({ id: 'cdn-prod--web-app-prod', from: 'cdn-prod', to: 'web-app-prod', label: 'Sirve la SPA', protocols: ['https'] }),
+    rel({ id: 'cdn-prod--alb-prod', from: 'cdn-prod', to: 'alb-prod', label: 'Origen de la API', protocols: ['https'], ports: [443] }),
+    rel({ id: 'alb-prod--api-gateway-prod', from: 'alb-prod', to: 'api-gateway-prod', label: 'Balancea', protocols: ['https'], ports: [8443] }),
+
+    {
+      type: 'view.add',
+      view: {
+        id: 'home-banking-despliegue-prod',
+        name: 'Home Banking · Despliegue Producción',
+        level: 'deployment',
+        scope: 'home-banking',
+        environment: 'prod',
+        description: 'Dónde corre cada parte de Home Banking en producción.',
+        nodes: {
+          cliente: { x: -560, y: 120 },
+          celular: { x: -600, y: 300, w: 300, h: 180 },
+          'app-movil-prod': { x: -560, y: 380 },
+          'aws-prod': { x: -200, y: 0, w: 1560, h: 740 },
+          'cdn-prod': { x: -160, y: 240 },
+          'web-app-prod': { x: -160, y: 440 },
+          'vpc-prod': { x: 120, y: 80, w: 1200, h: 620 },
+          'subnet-publica-prod': { x: 160, y: 170, w: 300, h: 490 },
+          'alb-prod': { x: 200, y: 370 },
+          'subnet-privada-prod': { x: 500, y: 170, w: 780, h: 490 },
+          'eks-prod': { x: 540, y: 250, w: 300, h: 370 },
+          'api-gateway-prod': { x: 580, y: 330 },
+          'cuentas-api-prod': { x: 580, y: 416 },
+          'pagos-api-prod': { x: 580, y: 502 },
+          'banking-db-prod': { x: 1000, y: 330 },
+          'cache-prod': { x: 1000, y: 416 },
+          'eventos-prod': { x: 1000, y: 502 },
+          'dc-central': { x: 1480, y: 220, w: 300, h: 200 },
+          'core-bancario-prod': { x: 1520, y: 300 },
+          'pasarela-pagos': { x: 1520, y: 520 },
+        },
+      },
+    },
   ];
 }
 

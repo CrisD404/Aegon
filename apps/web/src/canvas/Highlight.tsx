@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { deployedIn, visualParentOf, type View } from '@aegon/core';
+import { deployedIn, isExpandedInView, statusOf, visualParentOf, type View } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import type { RelationFlowEdge } from './derive.ts';
@@ -8,7 +8,7 @@ import { focusSet, searchMatches } from './search.ts';
 const byId = (ids: Iterable<string>) =>
   [...ids].map((id) => `[data-id="${CSS.escape(id)}"]`).join(',');
 const labels = (ids: Iterable<string>) =>
-  [...ids].map((id) => `[data-testid="edge-label-${CSS.escape(id)}"]`).join(',');
+  [...ids].map((id) => `[data-edge-label="${CSS.escape(id)}"]`).join(',');
 
 /**
  * Resaltado del lienzo con una hoja de estilos generada (sin re-renderizar nodos): la búsqueda
@@ -28,6 +28,7 @@ export function CanvasHighlight({
   const search = useUi((s) => s.search);
   const costOverlay = useUi((s) => s.costOverlay);
   const costEnv = useUi((s) => s.costEnv);
+  const statusLens = useUi((s) => s.statusLens);
 
   const css = useMemo(() => {
     const scope = '.canvas-shell';
@@ -57,8 +58,39 @@ export function CanvasHighlight({
         ].join('\n'),
       );
     }
+    if (statusLens) {
+      // Leyenda de estados: queda a la vista solo lo que está en ese estado (nodos, marcos y flechas).
+      const keepNodes = Object.keys(view.nodes).filter((id) => statusOf(model, id).status === statusLens);
+      const keepEdges = edges.filter((e) => e.data?.status === statusLens && !e.data.implied).map((e) => e.id);
+      const node = `${scope} .react-flow__node:not(.react-flow__node-boundary)`;
+      const rules = [keepNodes.length ? `${node}:not(:is(${byId(keepNodes)})) { opacity: 0.24; }` : `${node} { opacity: 0.24; }`];
+      if (keepEdges.length) {
+        rules.push(`${scope} .react-flow__edge:not(:is(${byId(keepEdges)})) { opacity: 0.12; }`);
+        rules.push(`${scope} .c4-edge-label:not(:is(${labels(keepEdges)})) { opacity: 0.18; }`);
+      } else {
+        rules.push(`${scope} .react-flow__edge, ${scope} .c4-edge-label { opacity: 0.12; }`);
+      }
+      return withEnv(rules.join('\n'));
+    }
     if (focusMode && selected.length) {
-      const keep = focusSet(selected, edges);
+      // Un elemento abierto en el lugar es todo lo que contiene: sus dependencias son las de adentro.
+      const focus = new Set(selected);
+      const open = selected.filter((id) => isExpandedInView(view, id));
+      if (open.length) {
+        for (const id of Object.keys(view.nodes)) {
+          const seen = new Set<string>();
+          let parent = model.elements[id] ? visualParentOf(model, view, model.elements[id]!) : undefined;
+          while (parent && !seen.has(parent)) {
+            if (open.includes(parent)) {
+              focus.add(id);
+              break;
+            }
+            seen.add(parent);
+            parent = model.elements[parent] ? visualParentOf(model, view, model.elements[parent]!) : undefined;
+          }
+        }
+      }
+      const keep = focusSet([...focus], edges);
       // Un marco seleccionado (grupo, nodo de despliegue) no atenúa lo que contiene.
       const inside = (id: string): boolean => {
         const el = model.elements[id];
@@ -67,18 +99,18 @@ export function CanvasHighlight({
       };
       for (const id of Object.keys(view.nodes)) if (!keep.nodes.has(id) && inside(id)) keep.nodes.add(id);
       // Suave (es el modo por defecto) y nunca mientras se arrastra: reacomodar necesita ver todo.
-      const focus = `${scope}:not(:has(.react-flow__node.dragging))`;
-      const rules = [`${focus} .react-flow__node-element:not(:is(${byId(keep.nodes)})) { opacity: 0.38; }`];
+      const still = `${scope}:not(:has(.react-flow__node.dragging))`;
+      const rules = [`${still} .react-flow__node-element:not(:is(${byId(keep.nodes)})) { opacity: 0.38; }`];
       if (keep.edges.size) {
-        rules.push(`${focus} .react-flow__edge:not(:is(${byId(keep.edges)})) { opacity: 0.18; }`);
-        rules.push(`${focus} .c4-edge-label:not(:is(${labels(keep.edges)})) { opacity: 0.25; }`);
+        rules.push(`${still} .react-flow__edge:not(:is(${byId(keep.edges)})) { opacity: 0.18; }`);
+        rules.push(`${still} .c4-edge-label:not(:is(${labels(keep.edges)})) { opacity: 0.25; }`);
       } else {
-        rules.push(`${focus} .react-flow__edge, ${focus} .c4-edge-label { opacity: 0.18; }`);
+        rules.push(`${still} .react-flow__edge, ${still} .c4-edge-label { opacity: 0.18; }`);
       }
       return withEnv(rules.join('\n'));
     }
     return withEnv('');
-  }, [model, view, edges, focusMode, selected, search, costOverlay, costEnv]);
+  }, [model, view, edges, focusMode, selected, search, costOverlay, costEnv, statusLens]);
 
   return css ? <style data-testid="canvas-highlight">{css}</style> : null;
 }

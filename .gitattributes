@@ -1,1 +1,3 @@
 * text=auto eol=lf
+# Bundle generado (`pnpm build:skill`): GitHub lo colapsa en los diffs y no lo cuenta como código.
+skills/aegon/bin/aegon.mjs linguist-generated=true

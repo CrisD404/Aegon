@@ -283,6 +283,18 @@ export function repairModel(model: Model): { model: Model; notes: string[] } {
     const next: View = { ...view, nodes };
     if (edges && Object.keys(edges).length) next.edges = edges;
     else delete next.edges;
+    // Lo abierto y lo guardado de elementos que ya no existen.
+    const expanded = view.expanded?.filter((e) => elements[e]);
+    if (expanded?.length) next.expanded = expanded;
+    else delete next.expanded;
+    const folded: NonNullable<View['folded']> = {};
+    for (const [owner, inner] of Object.entries(view.folded ?? {})) {
+      if (!elements[owner]) continue;
+      const kept = Object.fromEntries(Object.entries(inner).filter(([n]) => elements[n]));
+      if (Object.keys(kept).length) folded[owner] = kept;
+    }
+    if (Object.keys(folded).length) next.folded = folded;
+    else delete next.folded;
     views[id] = next;
   }
 

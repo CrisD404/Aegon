@@ -23,6 +23,12 @@ import {
   Wallet,
   FileText,
   ImageDown,
+  Activity,
+  CircleDollarSign,
+  Gauge,
+  PenTool,
+  Server,
+  type LucideIcon,
 } from 'lucide-react';
 import { parentViewOf, type Model, type View } from '@aegon/core';
 import { Glyph, TechIcon } from '@aegon/icons';
@@ -46,8 +52,10 @@ import {
   openExportDialog,
 } from '../lib/flows.tsx';
 import { viewBadge } from '../lib/view-badge.ts';
-import { Button, IconButton, Kbd, cn } from '../ui/primitives.tsx';
+import { goToMode, useMode, type Mode } from '../lib/modes.ts';
+import { Button, IconButton, Kbd, Tip, cn } from '../ui/primitives.tsx';
 import { useChangeCount, useUnsaved } from './ChangesPanel.tsx';
+import { healthCount, useHealth } from './HealthPanel.tsx';
 
 export function Logo({ size = 22 }: { size?: number }) {
   return (
@@ -345,13 +353,14 @@ export function TopBar() {
       >
         <PanelLeft size={16} />
       </IconButton>
+      <ModeSwitch />
       <Breadcrumbs />
 
       <div className="ml-auto flex items-center gap-1">
         <button
           type="button"
           onClick={() => useUi.getState().setPalette(true)}
-          className="mr-1 hidden h-8 w-[220px] items-center gap-2 rounded-sm border border-line bg-raised px-2.5 text-[12.5px] text-fg-subtle transition-colors hover:border-line-strong hover:text-fg-muted md:flex"
+          className="mr-1 hidden h-8 w-[200px] shrink-0 items-center gap-2 rounded-sm border border-line bg-raised px-2.5 text-[12.5px] whitespace-nowrap text-fg-subtle transition-colors hover:border-line-strong hover:text-fg-muted min-[1800px]:flex"
           data-testid="open-palette"
         >
           <Search size={13} />
@@ -361,6 +370,12 @@ export function TopBar() {
             <Kbd>K</Kbd>
           </span>
         </button>
+        {/* En pantallas más angostas la búsqueda es un ícono: el lugar es de los modos y la ruta. */}
+        <span className="min-[1800px]:hidden">
+          <IconButton label="Buscar o ejecutar" shortcut="Ctrl K" tipSide="bottom" onClick={() => useUi.getState().setPalette(true)}>
+            <Search size={16} />
+          </IconButton>
+        </span>
         <IconButton
           label="Deshacer"
           shortcut="Ctrl Z"
@@ -390,6 +405,7 @@ export function TopBar() {
           <PanelRight size={16} />
         </IconButton>
         <div className="mx-1 h-5 w-px bg-line" />
+        <HealthIndicator />
         <SyncIndicator />
         <button
           type="button"
@@ -442,6 +458,64 @@ export function TopBar() {
         )}
       </div>
     </header>
+  );
+}
+
+const MODES: [Mode, string, LucideIcon, string][] = [
+  ['design', 'Diseñar', PenTool, 'El modelo: contexto, contenedores y componentes'],
+  ['deploy', 'Desplegar', Server, 'Dónde corre cada parte, por ambiente'],
+  ['simulate', 'Simular', Gauge, 'Cuánto tráfico aguanta y qué se satura primero'],
+  ['costs', 'Costos', CircleDollarSign, 'Cuánto cuesta cada parte, por ambiente'],
+];
+
+/**
+ * Modos de trabajo: el mismo modelo, mirado según lo que se quiere hacer. Cada modo trae sus
+ * controles al lienzo (profundidad, ambientes, costos) y las features nuevas entran acá como un
+ * modo más, no como otra pestaña.
+ */
+function ModeSwitch() {
+  const mode = useMode();
+  return (
+    <div className="flex h-8 shrink-0 items-center gap-0.5 rounded-md bg-raised p-0.5" role="group" aria-label="Modo de trabajo" data-testid="modes">
+      {MODES.map(([id, label, Icon, hint]) => (
+        <Tip key={id} label={hint} side="bottom">
+          <button
+            type="button"
+            aria-pressed={mode === id}
+            aria-label={label}
+            onClick={() => goToMode(id)}
+            className={cn(
+              'flex h-7 items-center gap-1.5 rounded-[5px] px-2.5 text-[12.5px] font-medium transition-colors',
+              mode === id ? 'bg-panel text-fg shadow-sm' : 'text-fg-subtle hover:text-fg',
+            )}
+            data-testid={`mode-${id}`}
+          >
+            <Icon size={14} strokeWidth={1.9} />
+            <span className={mode === id ? undefined : 'hidden min-[1400px]:inline'}>{label}</span>
+          </button>
+        </Tip>
+      ))}
+    </div>
+  );
+}
+
+/** Salud del modelo: aparece solo si hay errores o avisos, y abre el panel que los lista. */
+function HealthIndicator() {
+  const { errors, warnings } = healthCount(useHealth());
+  if (!errors && !warnings) return null;
+  const n = errors || warnings;
+  return (
+    <button
+      type="button"
+      onClick={() => useUi.getState().setRightTab('health')}
+      className="flex h-8 items-center gap-1.5 rounded-sm px-2 text-[12.5px] font-medium text-fg-muted transition-colors hover:bg-hover hover:text-fg"
+      title={errors ? `${errors} ${errors === 1 ? 'error' : 'errores'} en el modelo` : `${warnings} ${warnings === 1 ? 'aviso' : 'avisos'} en el modelo`}
+      data-testid="health-indicator"
+    >
+      <Activity size={14} className={errors ? 'text-danger' : 'text-warn'} />
+      Salud
+      <span className={cn('min-w-[20px] rounded-full px-1.5 text-center text-[11px] font-semibold tabular-nums leading-[18px]', errors ? 'bg-danger/15 text-danger' : 'bg-warn/15 text-warn')}>{n}</span>
+    </button>
   );
 }
 

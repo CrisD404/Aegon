@@ -1,4 +1,4 @@
-import { allViewEdges, isDeploymentKind, type Element, type Model, type View } from '@aegon/core';
+import { STATUS_HINT, STATUS_LABEL, allViewEdges, isDeploymentKind, statusCounts, type Element, type Model, type Status, type View } from '@aegon/core';
 
 /**
  * Leyenda de un lienzo exportado: solo lo que el diagrama usa (tipos de elemento y estilos de
@@ -6,7 +6,14 @@ import { allViewEdges, isDeploymentKind, type Element, type Model, type View } f
  */
 
 export type LegendShape = 'person' | 'box' | 'store' | 'bus' | 'frame' | 'group' | 'boundary' | 'infra' | 'instance';
-export type LineStyle = 'solid' | 'implied' | 'network' | 'planned';
+export type LineStyle = 'solid' | 'implied' | 'network';
+
+/** Estado presente en el lienzo (nuevo, se modifica, se da de baja, retirado). */
+export interface LegendMark {
+  status: Status;
+  label: string;
+  hint: string;
+}
 
 export interface LegendItem {
   key: string;
@@ -27,7 +34,7 @@ export interface LegendLine {
 
 const ORDER = ['actor', 'actor-ext', 'system', 'system-ext', 'container', 'component', 'store', 'bus', 'boundary', 'group', 'node', 'infra', 'instance', 'instance-replicas'];
 
-export function legendFor(model: Model, view: View): { items: LegendItem[]; lines: LegendLine[] } {
+export function legendFor(model: Model, view: View): { items: LegendItem[]; lines: LegendLine[]; marks: LegendMark[] } {
   const items = new Map<string, LegendItem>();
   const add = (item: LegendItem) => items.set(item.key, item);
   const placed = Object.keys(view.nodes)
@@ -81,10 +88,11 @@ export function legendFor(model: Model, view: View): { items: LegendItem[]; line
     if (edge.implied) lines.set('implied', { key: 'implied', label: 'Relación implícita (entre elementos internos)', style: 'implied' });
     else if (network) lines.set('network', { key: 'network', label: 'Tramo de red', style: 'network' });
     else lines.set('solid', { key: 'solid', label: view.level === 'deployment' ? 'Relación entre contenedores' : 'Relación', style: 'solid' });
-    if (!edge.implied && edge.relations.some((r) => r.status === 'planned')) lines.set('planned', { key: 'planned', label: 'Planificada', style: 'planned' });
     if (edge.bidirectional) lines.set('bidirectional', { key: 'bidirectional', label: 'Bidireccional', style: network ? 'network' : 'solid', both: true });
   }
   const sortedItems = [...items.values()].sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
-  const lineOrder = ['solid', 'network', 'implied', 'planned', 'bidirectional'];
-  return { items: sortedItems, lines: [...lines.values()].sort((a, b) => lineOrder.indexOf(a.key) - lineOrder.indexOf(b.key)) };
+  const lineOrder = ['solid', 'network', 'implied', 'bidirectional'];
+  const drawn = allViewEdges(model, view).flatMap((edge) => (edge.implied ? [] : edge.relations.map((r) => r.id)));
+  const marks = statusCounts(model, Object.keys(view.nodes), drawn).map(({ status }) => ({ status, label: STATUS_LABEL[status], hint: STATUS_HINT[status].toLowerCase() }));
+  return { items: sortedItems, lines: [...lines.values()].sort((a, b) => lineOrder.indexOf(a.key) - lineOrder.indexOf(b.key)), marks };
 }

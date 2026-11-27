@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Handle, Position, NodeResizer, type NodeProps } from '@xyflow/react';
 import { AppWindow, Cog, Globe, Layers, Link2, Monitor, Smartphone, Webhook, Workflow, Zap } from 'lucide-react';
 import {
@@ -8,12 +8,17 @@ import {
   KIND_LABEL,
   NODE_TYPE_LABEL,
   RISK_LABEL,
+  STATUS_HINT,
+  STATUS_LABEL,
+  STATUS_MARK,
   findBroker,
   findEngine,
   findTechnology,
   type ContainerType,
   type Element,
+  type Status,
   ADDRESS_ROW_HEIGHT,
+  DEFAULT_SIZE,
   addressRows,
   networkLabels,
 } from '@aegon/core';
@@ -23,6 +28,19 @@ import { useLod } from '../lod.ts';
 import { useNodeCost } from '../costs.ts';
 import { moneyCompact } from '../../lib/money.ts';
 import { INFRA_TYPE_ICON, NODE_TYPE_ICON } from './deployment-icons.tsx';
+import { MIN_NODE_SIZE } from './sizes.ts';
+import { toggleExpand } from '../../lib/actions.ts';
+import { rpsText, usageText, useNodeLoad } from '../load.ts';
+
+/** Etiqueta del estado sobre el nodo: nuevo, se modifica, baja o retirado. Lo que existe y no cambia no lleva. */
+export function StatusMark({ status, show }: { status?: Status; show?: boolean }) {
+  if (!status || status === 'live' || !show) return null;
+  return (
+    <span className="c4-status" data-status={status} title={`${STATUS_LABEL[status]}: ${STATUS_HINT[status].toLowerCase()}`}>
+      {STATUS_MARK[status]}
+    </span>
+  );
+}
 
 /** Costo mensual del nodo (propio + hijos) con la capa de costos activa. */
 export function CostBadge({ id }: { id: string }) {
@@ -35,6 +53,23 @@ export function CostBadge({ id }: { id: string }) {
   );
 }
 
+/** Uso del nodo con el modo Simular activo: carga sobre capacidad (o pedidos por segundo si no tiene límite). */
+export function LoadBadge({ id }: { id: string }) {
+  const node = useNodeLoad(id);
+  if (!node || node.state === 'idle') return null;
+  const of = node.capacity !== null ? ` de ${rpsText(node.capacity)}` : '';
+  return (
+    <span
+      className="c4-cost c4-load"
+      data-heat={node.state === 'saturated' ? 3 : node.state === 'busy' ? 2 : 1}
+      title={`Le llegan ${rpsText(node.load)}${of} pedidos por segundo${node.assumed ? ' (capacidad supuesta por tipo)' : ''}`}
+      data-testid={`load-${id}`}
+    >
+      {node.utilization === null ? `${rpsText(node.load)}/s` : usageText(node.utilization)}
+    </span>
+  );
+}
+
 const HANDLES = [
   { id: 't', position: Position.Top },
   { id: 'r', position: Position.Right },
@@ -42,8 +77,18 @@ const HANDLES = [
   { id: 'l', position: Position.Left },
 ] as const;
 
-/** Altura a partir de la cual el nodo (redimensionado) muestra también la descripción. */
-const DESCRIPTION_MIN_HEIGHT = 104;
+/** Altura a partir de la cual el nodo (redimensionado) acomoda su contenido arriba, como una tarjeta. */
+const TALL_MIN_HEIGHT = 104;
+
+/*
+ * La descripción entra apenas hay lugar para un renglón, y muestra tantos como entren. Estas medidas
+ * van de la mano con `canvas.css`: borde + margen de arriba de un nodo alto + separación con la
+ * descripción + el aire mínimo que queda abajo; el alto de cada renglón; y el alto habitual del
+ * encabezado (nombre en una línea + tipo), que después se mide en el nodo real.
+ */
+const DESCRIPTION_FRAME = 1 + 10 + 6 + 4;
+const DESCRIPTION_LINE = 16;
+const HEAD_HEIGHT = 33;
 
 const CONTAINER_ICON: Record<ContainerType, typeof Globe> = {
   web: Globe,
@@ -148,6 +193,14 @@ function ElementNodeImpl({ data, width, height, selected }: NodeProps<ElementFlo
   const el = data.element;
   const target = data.target;
   const lod = useLod();
+  // Alto real del encabezado (el nombre puede ocupar dos líneas): de ahí sale cuánta descripción entra.
+  const headRef = useRef<HTMLDivElement>(null);
+  const [headHeight, setHeadHeight] = useState(HEAD_HEIGHT);
+  const described = !!el.description;
+  useLayoutEffect(() => {
+    const measured = described ? headRef.current?.offsetHeight : undefined;
+    if (measured && measured !== headHeight) setHeadHeight(measured);
+  });
   const replicas = el.kind === 'instance' ? el.instance.replicas : undefined;
   const common = {
     // Una instancia toma el color de lo que despliega.
@@ -155,16 +208,18 @@ function ElementNodeImpl({ data, width, height, selected }: NodeProps<ElementFlo
     'data-instance': el.kind === 'instance' || undefined,
     'data-replicas': replicas && replicas > 1 ? replicas : undefined,
     'data-external': el.scope === 'external' || (el.kind === 'instance' && target?.scope === 'external') || undefined,
-    'data-status': el.status,
+    'data-status': data.status,
     'data-testid': `node-${el.id}`,
   };
   if (lod === 'far') {
     // Vista lejana: franja + nombre (con escala compensada por CSS) y los handles.
     return (
       <div className="c4-node c4-node--far" {...common}>
+        <StatusMark status={data.status} show={data.statusMark} />
         <span className="c4-node__stripe" />
         <div className="c4-node__name">{el.name}</div>
         <CostBadge id={el.id} />
+        <LoadBadge id={el.id} />
         <Handles />
       </div>
     );
@@ -173,48 +228,71 @@ function ElementNodeImpl({ data, width, height, selected }: NodeProps<ElementFlo
   const risk = 'risk' in el ? el.risk : undefined;
   const network = el.kind === 'infra' || el.kind === 'instance' || el.kind === 'node' ? networkLabels(el) : [];
   const rows = network.length ? addressRows(network, width ?? undefined) : [];
-  // Las direcciones ocupan su lugar: la descripción solo entra si el nodo es más alto todavía.
-  const tall = (height ?? 0) >= DESCRIPTION_MIN_HEIGHT + rows.length * ADDRESS_ROW_HEIGHT;
+  // El tamaño compacto no lleva descripción. Agrandado, entran los renglones que quepan debajo del
+  // encabezado (las direcciones ocupan su lugar antes).
+  const addressHeight = rows.length * ADDRESS_ROW_HEIGHT;
+  const size = height ?? 0;
+  const lines = described && size > DEFAULT_SIZE[el.kind].h + addressHeight ? Math.max(0, Math.floor((size - DESCRIPTION_FRAME - headHeight) / DESCRIPTION_LINE)) : 0;
+  const tall = lines > 0 || size >= TALL_MIN_HEIGHT + addressHeight;
 
   return (
     <div className="c4-node" {...common} data-tall={tall || undefined} data-new={data.fresh || undefined}>
-      <NodeResizer isVisible={selected} minWidth={160} minHeight={60} />
+      <NodeResizer isVisible={selected} minWidth={MIN_NODE_SIZE.element.w} minHeight={MIN_NODE_SIZE.element.h} />
+      <StatusMark status={data.status} show={data.statusMark} />
       <span className="c4-node__stripe" />
       <KindChip el={el} target={target} />
       <div className="c4-node__body">
-        <div className="c4-node__name">
-          {el.name}
-          {replicas && replicas > 1 ? <span className="c4-node__replicas" title={`${replicas} réplicas`}>×{replicas}</span> : null}
-        </div>
-        <div className="c4-node__metarow">
-          <span className="c4-node__meta">
-            {kindCaption(el, target)}
-            {technology.length ? <span className="c4-node__tech"> · {technology.map((t) => findTechnology(t)?.name ?? t).join(', ')}</span> : null}
-          </span>
-          {data.viewCount > 1 ? (
-            <span className="c4-node__badge" title={`Aparece en ${data.viewCount} lienzos`}>
-              <Link2 size={10} />
-              {data.viewCount}
-            </span>
-          ) : null}
-          {data.canDrill ? (
-            <span className="c4-node__badge c4-node__drill" title={`Doble click para abrir ${el.kind === 'system' ? 'los contenedores (L2)' : 'los componentes (L3)'}`}>
-              <Layers size={10} />
-              {data.childCount || (data.hasChildView ? '·' : '+')}
-            </span>
-          ) : null}
-        </div>
-        {rows.length ? (
-          <div className="c4-node__addr" title={network.join('\n')}>
-            {rows.map((row, i) => (
-              <div key={i}>{row}</div>
-            ))}
+        <div className="c4-node__head" ref={headRef}>
+          <div className="c4-node__name">
+            {el.name}
+            {replicas && replicas > 1 ? <span className="c4-node__replicas" title={`${replicas} réplicas`}>×{replicas}</span> : null}
           </div>
+          <div className="c4-node__metarow">
+            <span className="c4-node__meta">
+              {kindCaption(el, target)}
+              {technology.length ? <span className="c4-node__tech"> · {technology.map((t) => findTechnology(t)?.name ?? t).join(', ')}</span> : null}
+            </span>
+            {data.viewCount > 1 ? (
+              <span className="c4-node__badge" title={`Aparece en ${data.viewCount} lienzos`}>
+                <Link2 size={10} />
+                {data.viewCount}
+              </span>
+            ) : null}
+            {data.canDrill ? (
+              <button
+                type="button"
+                className="c4-node__badge c4-node__drill nodrag nopan"
+                title={`Abrir acá ${el.kind === 'system' ? 'sus contenedores' : 'sus componentes'} (doble click o Enter)`}
+                aria-label={`Abrir ${el.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleExpand(el.id);
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+                data-testid={`expand-${el.id}`}
+              >
+                <Layers size={10} />
+                {data.childCount || (data.hasChildView ? '·' : '+')}
+              </button>
+            ) : null}
+          </div>
+          {rows.length ? (
+            <div className="c4-node__addr" title={network.join('\n')}>
+              {rows.map((row, i) => (
+                <div key={i}>{row}</div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {lines > 0 ? (
+          <p className="c4-node__desc" style={{ WebkitLineClamp: lines }} data-lines={lines} data-testid={`node-desc-${el.id}`}>
+            {el.description}
+          </p>
         ) : null}
-        {tall && el.description ? <p className="c4-node__desc">{el.description}</p> : null}
       </div>
       {risk ? <span className="c4-node__risk" data-risk={risk} title={`Riesgo ${RISK_LABEL[risk].toLowerCase()}`} /> : null}
       <CostBadge id={el.id} />
+      <LoadBadge id={el.id} />
       <Handles />
     </div>
   );

@@ -8,12 +8,13 @@ import {
   activeView,
   arrange,
   copySelection,
+  deleteSelection,
   deleteSelectionFromModel,
   drillInto,
   duplicateSelection,
   goUp,
   paste,
-  removeSelectionFromView,
+  toggleExpand,
 } from './actions.ts';
 
 function isTyping(target: EventTarget | null): boolean {
@@ -105,7 +106,7 @@ export function useShortcuts() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         if (e.shiftKey) deleteSelectionFromModel();
-        else removeSelectionFromView();
+        else deleteSelection();
         return;
       }
       if (e.altKey && e.key === 'ArrowUp') {
@@ -120,9 +121,16 @@ export function useShortcuts() {
       if (e.key === 'Enter' && ui.selection.nodes.length === 1) {
         const id = ui.selection.nodes[0]!;
         const el = ws.model.elements[id];
-        if (el && childLevelOf(el.kind)) {
+        const deployment = activeView()?.level === 'deployment';
+        if (el && childLevelOf(el.kind) && !deployment) {
           e.preventDefault();
-          void canvasApi.zoomToNode(id).then(() => drillInto(id));
+          // Enter abre o cierra en el lugar; con Alt, va a su lienzo de detalle.
+          if (e.altKey) void canvasApi.zoomToNode(id).then(() => drillInto(id));
+          else toggleExpand(id);
+        } else if (el) {
+          // Lo que no se abre, se renombra.
+          e.preventDefault();
+          ui.requestRename();
         }
         return;
       }

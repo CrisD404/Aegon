@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { FolderOpen, Loader2, X } from 'lucide-react';
+import { Activity, CircleDollarSign, FolderOpen, Gauge, GitCompareArrows, Loader2, MessageSquare, SlidersHorizontal, X, type LucideIcon } from 'lucide-react';
 import { Canvas } from './canvas/Canvas.tsx';
 import { Sidebar } from './panels/Sidebar.tsx';
 import { Inspector } from './panels/Inspector.tsx';
@@ -8,6 +8,8 @@ import { ChangesPanel, useChangeCount } from './panels/ChangesPanel.tsx';
 import { CommandPalette } from './panels/CommandPalette.tsx';
 import { CostsPanel } from './panels/CostsPanel.tsx';
 import { CommentsPanel } from './panels/CommentsPanel.tsx';
+import { HealthPanel, healthCount, useHealth } from './panels/HealthPanel.tsx';
+import { LoadPanel } from './panels/LoadPanel.tsx';
 import { ConflictDialog, GitHubDialog } from './panels/SyncDialogs.tsx';
 import { DialogHost } from './panels/Dialogs.tsx';
 import { useTemplates } from './store/templates.ts';
@@ -19,7 +21,7 @@ import { useUi, type RightTab } from './store/ui.ts';
 import { createDemoWorkspace, defaultViewOf, openFolder, openDevFolder, openRecord, useWorkspace } from './store/workspace.ts';
 import { lastWorkspaceKey, persist } from './lib/persist.ts';
 import { useShortcuts } from './lib/shortcuts.ts';
-import { Button, cn } from './ui/primitives.tsx';
+import { Button, Tip, cn } from './ui/primitives.tsx';
 
 const panelSpring = { type: 'spring', stiffness: 420, damping: 38, mass: 0.8 } as const;
 
@@ -138,33 +140,52 @@ function RightPanel() {
   const setRightTab = useUi((s) => s.setRightTab);
   const changes = useChangeCount();
   const openComments = useWorkspace((s) => Object.values(s.model.comments ?? {}).filter((c) => !c.resolved).length);
-  const tabs: [RightTab, string][] = [
-    ['inspector', 'Inspector'],
-    ['changes', 'Cambios'],
-    ['costs', 'Costos'],
-    ['comments', 'Comentarios'],
+  const health = healthCount(useHealth());
+  const simulate = useUi((s) => s.simulate);
+  // Cada panel es un ícono; el activo muestra su nombre. El del modo es uno solo: Costos, o Carga
+  // mientras se simula, así las pestañas no crecen con cada modo que se sume.
+  const tabs: [RightTab, string, LucideIcon][] = [
+    ['inspector', 'Inspector', SlidersHorizontal],
+    ['changes', 'Cambios', GitCompareArrows],
+    simulate || tab === 'load' ? ['load', 'Carga', Gauge] : ['costs', 'Costos', CircleDollarSign],
+    ['comments', 'Comentarios', MessageSquare],
+    ['health', 'Salud', Activity],
   ];
+  const badge = (id: RightTab): { n: number; tone: string } | null => {
+    if (id === 'changes' && changes) return { n: changes, tone: 'bg-warn/15 text-warn' };
+    if (id === 'comments' && openComments) return { n: openComments, tone: 'bg-accent-soft text-accent' };
+    if (id === 'health' && health.errors) return { n: health.errors, tone: 'bg-danger/15 text-danger' };
+    if (id === 'health' && health.warnings) return { n: health.warnings, tone: 'bg-warn/15 text-warn' };
+    return null;
+  };
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 gap-0.5 border-b border-line px-2 pt-2" role="tablist">
-        {tabs.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            onClick={() => setRightTab(id)}
-            className={cn('relative flex h-8 items-center gap-1.5 rounded-t-sm px-2.5 text-[12.5px] font-medium transition-colors', tab === id ? 'text-fg' : 'text-fg-subtle hover:text-fg-muted')}
-            data-testid={`tab-${id}`}
-          >
-            {label}
-            {id === 'changes' && changes ? <span className="rounded-full bg-warn/15 px-1.5 tabular-nums font-semibold text-[10.5px] leading-4 text-warn">{changes}</span> : null}
-            {id === 'comments' && openComments ? <span className="rounded-full bg-accent-soft px-1.5 tabular-nums font-semibold text-[10.5px] leading-4 text-accent">{openComments}</span> : null}
-            {tab === id ? <motion.span layoutId="right-tab" className="absolute right-2 bottom-[-1px] left-2 h-[2px] rounded-full bg-accent" /> : null}
-          </button>
-        ))}
+        {tabs.map(([id, label, Icon]) => {
+          const b = badge(id);
+          return (
+            <Tip key={id} label={label} side="bottom">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                aria-label={label}
+                onClick={() => setRightTab(id)}
+                className={cn('relative flex h-8 items-center gap-1.5 rounded-t-sm px-2.5 text-[12.5px] font-medium transition-colors', tab === id ? 'text-fg' : 'text-fg-subtle hover:text-fg-muted')}
+                data-testid={`tab-${id}`}
+              >
+                <Icon size={15} strokeWidth={1.9} />
+                {tab === id ? <span>{label}</span> : null}
+                {b ? <span className={cn('rounded-full px-1.5 tabular-nums font-semibold text-[10.5px] leading-4', b.tone)}>{b.n}</span> : null}
+                {tab === id ? <motion.span layoutId="right-tab" className="absolute right-2 bottom-[-1px] left-2 h-[2px] rounded-full bg-accent" /> : null}
+              </button>
+            </Tip>
+          );
+        })}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">{tab === 'inspector' ? <Inspector /> : tab === 'costs' ? <CostsPanel /> : tab === 'comments' ? <CommentsPanel /> : <ChangesPanel />}</div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {tab === 'inspector' ? <Inspector /> : tab === 'costs' ? <CostsPanel /> : tab === 'comments' ? <CommentsPanel /> : tab === 'health' ? <HealthPanel /> : tab === 'load' ? <LoadPanel /> : <ChangesPanel />}
+      </div>
     </div>
   );
 }

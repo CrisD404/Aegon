@@ -11,7 +11,9 @@ import {
   KIND_EXAMPLES,
   KIND_LABEL,
   NODE_TYPE_LABEL,
+  TECHNOLOGIES,
   blockProblem,
+  descendantsOf,
   indexOf,
   newElement,
   instancesOf,
@@ -23,6 +25,7 @@ import {
   templateStats,
   viewsContaining,
   type Element,
+  type DeployedSoftware,
   type ElementKind,
   type Id,
   type View,
@@ -32,7 +35,7 @@ import { CornerDownLeft, LayoutTemplate, Link2, Search } from 'lucide-react';
 import { useUi, type GhostState } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import { allTemplates, useTemplates } from '../store/templates.ts';
-import { createElementAt, deployAt, placeExisting } from '../lib/actions.ts';
+import { createDeployedAt, createElementAt, deployAt, placeExisting } from '../lib/actions.ts';
 import { insertTemplate } from '../lib/flows.tsx';
 import { elementIcon, kindCaption } from './nodes/ElementNode.tsx';
 import { INFRA_TYPE_ICON, NODE_TYPE_ICON } from './nodes/deployment-icons.tsx';
@@ -50,6 +53,22 @@ const EDGE = 12;
 const CHROME_H = 82;
 /** Id de los elementos de mentira que dibuja la vista previa (nunca entran al modelo). */
 const GHOST_ID = '__ghost';
+
+/**
+ * Software que se crea ya desplegado en un lienzo de despliegue: nace con su instancia, que es la
+ * que lleva dirección y puertos. `glyph` es el tipo lógico que se dibuja.
+ */
+const DEPLOYED: readonly { what: DeployedSoftware; glyph: ElementKind; label: string; desc: string; examples: readonly string[] }[] = [
+  { what: 'service', glyph: 'container', label: 'Servicio o aplicación', desc: 'Software que corre acá, con sus puertos', examples: ['API de pagos', 'Active Directory'] },
+  { what: 'store', glyph: 'store', label: 'Base de datos', desc: 'Datos que viven acá: base, caché, archivos', examples: ['PostgreSQL', 'Redis'] },
+  { what: 'bus', glyph: 'bus', label: 'Bus de mensajería', desc: 'Colas, tópicos y streams que corren acá', examples: ['Kafka', 'RabbitMQ'] },
+];
+
+/** En despliegue un nodo se explica por lo que es para quien arma el diagrama, no por la jerga de C4. */
+const DEPLOY_KIND_TEXT: Partial<Record<ElementKind, { label: string; desc: string; examples: readonly string[] }>> = {
+  node: { label: 'Nodo', desc: 'Servidor, VM, red, clúster o datacenter. Lleva la IP', examples: ['Servidor web', 'Subred DMZ'] },
+  infra: { label: 'Infraestructura', desc: 'Por donde pasa el tráfico: firewall, balanceador, VPN', examples: ['Firewall perimetral', 'Balanceador'] },
+};
 
 /** Qué tan bien coincide un nombre con lo escrito: exacto 4, empieza 3, alguna palabra empieza 2.5, contiene 2. */
 function matchScore(e: Element, nq: string): number {
@@ -80,16 +99,21 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
   const nq = normalize(query);
   const deployment = view.level === 'deployment';
 
+  const insideKind = ghost.inside ? model.elements[ghost.inside]?.kind : undefined;
   const kinds = useMemo(() => {
-    const allowed = KINDS_FOR_LEVEL[view.level];
+    // Dentro de un elemento abierto en el lugar se crea lo que ese elemento contiene.
+    const allowed: readonly ElementKind[] =
+      insideKind === 'system' ? ['container', 'store', 'bus'] : insideKind === 'container' ? ['component', 'store'] : KINDS_FOR_LEVEL[view.level];
     return ghost.kind && allowed.includes(ghost.kind)
       ? [ghost.kind, ...allowed.filter((k) => k !== ghost.kind)]
       : [...allowed];
-  }, [ghost.kind, view.level]);
-  // Una instancia no se crea de la nada: se elige qué desplegar (sección "Desplegar").
+  }, [ghost.kind, view.level, insideKind]);
+  // Una instancia no se crea de la nada: se elige qué desplegar (sección "Desplegar") o se crea
+  // el software ya desplegado. Un sistema puesto directo en un despliegue no lleva IP: no se ofrece.
   const creatable = (ghost.connectFrom ? kinds.filter((k) => k !== 'group') : kinds).filter(
-    (k) => k !== 'instance',
+    (k) => k !== 'instance' && !(deployment && k === 'system'),
   );
+  const deployedKinds = deployment ? DEPLOYED : [];
 
   // Elementos del modelo que se pueden traer a este lienzo. Sin buscar, primero los que se
   // relacionan con lo que ya está en el lienzo (los más probables); buscando, por coincidencia.
@@ -129,7 +153,11 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
     return sortedValues(model.elements)
       .filter(
         (e) =>
-          (e.kind === 'container' || e.kind === 'store' || e.kind === 'bus') &&
+          (e.kind === 'container' ||
+            e.kind === 'store' ||
+            e.kind === 'bus' ||
+            // Un sistema sin contenedores se despliega entero (un producto, un servicio de terceros).
+            (e.kind === 'system' && !view.scope && !descendantsOf(model, e.id).length)) &&
           e.scope !== 'external',
       )
       .filter(
@@ -156,15 +184,20 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
       .filter(
         (t) => !nq || normalize(t.name).includes(nq) || normalize(t.description ?? '').includes(nq),
       )
-      .slice(0, nq ? 6 : 3);
+      .slice(0, nq ? 6 : 4);
   }, [userTemplates, view, nq, ghost.connectFrom]);
 
   // Sugerencias del catálogo según lo que se escribe ("mongo" → base MongoDB, "vpc" → red).
   const deployTypes = deployment ? suggestDeploymentTypes(q) : { nodes: [], infra: [] };
   const engines =
-    creatable.includes('store') && q.length >= 2 ? searchCatalog(DB_ENGINES, q, 3) : [];
+    (deployment || creatable.includes('store')) && q.length >= 2 ? searchCatalog(DB_ENGINES, q, 3) : [];
   const brokers =
-    creatable.includes('bus') && q.length >= 2 ? searchCatalog(MESSAGE_BROKERS, q, 3) : [];
+    (deployment || creatable.includes('bus')) && q.length >= 2 ? searchCatalog(MESSAGE_BROKERS, q, 3) : [];
+  // Productos y servicios conocidos ("active directory", "nginx"): se crean como servicio desplegado.
+  const techs = useMemo(
+    () => (deployment && q.length >= 2 ? searchCatalog(TECHNOLOGIES.filter((t) => t.category !== 'language'), q, 3) : []),
+    [deployment, q],
+  );
   const providers =
     creatable.includes('group') && q.length >= 2
       ? GROUP_PROVIDER_CATALOG.filter(
@@ -178,13 +211,20 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
   const suggestions =
     deployTypes.nodes.length +
     deployTypes.infra.length +
+    techs.length +
     engines.length +
     brokers.length +
     providers.length;
 
   const create = (kind: ElementKind, name: string, fields?: Partial<Element>) => {
     close();
-    createElementAt(kind, name, ghost.flow, { connectFrom: ghost.connectFrom, fields });
+    // En un despliegue una base o un bus nuevos nacen desplegados (con su instancia).
+    if (deployment && (kind === 'store' || kind === 'bus')) createDeployedAt(kind, name, ghost.flow, { connectFrom: ghost.connectFrom, fields });
+    else createElementAt(kind, name, ghost.flow, { connectFrom: ghost.connectFrom, fields });
+  };
+  const createDeployed = (what: DeployedSoftware, name: string, fields?: Partial<Element>) => {
+    close();
+    createDeployedAt(what, name, ghost.flow, { connectFrom: ghost.connectFrom, fields });
   };
   const pick = (id: string) => {
     close();
@@ -250,6 +290,15 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
     const provider = type === 'provider' ? providers.find((p) => p.id === id) : undefined;
     if (provider)
       return fake('group', provider.name, { group: { provider: provider.id } } as Partial<Element>);
+    const deployedKind = type === 'deployed' ? DEPLOYED.find((d) => d.what === id) : undefined;
+    const tech = type === 'tech' ? techs.find((t) => t.id === id) : undefined;
+    if (deployedKind || tech) {
+      // Lo que se va a ver en el lienzo: la instancia del software nuevo.
+      const name = tech ? tech.name : q || (deployedKind?.label ?? '');
+      const target = newElement(model, tech ? 'system' : deployedKind!.glyph, name, { id: `${GHOST_ID}-of`, ...(tech ? { technology: [tech.id] } : {}) } as Partial<Element>);
+      const el = newElement(model, 'instance', name, { id: GHOST_ID, instance: { of: target.id } } as Partial<Element>);
+      return { type: 'element', key: active, el, target, examples: q || tech ? undefined : deployedKind?.examples, tag: 'Nuevo · se despliega acá' };
+    }
     if (type === 'node') return fake('node', q, { node: { type: id } } as Partial<Element>);
     if (type === 'infra') return fake('infra', q, { infra: { type: id } } as Partial<Element>);
     const kind =
@@ -336,6 +385,17 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
     </Command.Group>
   );
 
+  // Lo que se puede crear, en orden. En despliegue: primero dónde corre (nodo), después qué corre
+  // (software, que nace desplegado) y por último lo que acompaña.
+  const kindOption = (kind: ElementKind) => {
+    const text = (deployment ? DEPLOY_KIND_TEXT[kind] : undefined) ?? { label: KIND_LABEL[kind], desc: KIND_DESCRIPTION[kind], examples: KIND_EXAMPLES[kind] };
+    return { value: `create:${kind}`, glyph: kind, ...text, run: () => create(kind, q), testId: `ghost-create-${kind}` };
+  };
+  const softwareOptions = deployedKinds.map((d) => ({ value: `deployed:${d.what}`, glyph: d.glyph, label: d.label, desc: d.desc, examples: d.examples, run: () => createDeployed(d.what, q), testId: `ghost-create-${d.what}` }));
+  const options = deployment
+    ? [...creatable.filter((k) => k === 'node').map(kindOption), ...softwareOptions, ...creatable.filter((k) => k !== 'node').map(kindOption)]
+    : creatable.map(kindOption);
+
   const createGroup = (
     <Command.Group
       heading={
@@ -378,6 +438,20 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
           </Command.Item>
         );
       })}
+      {techs.map((tech) => (
+        <Command.Item
+          key={tech.id}
+          value={`tech:${tech.id}`}
+          onSelect={() => createDeployed('service', tech.name, { technology: [tech.id] } as Partial<Element>)}
+          className="ghost-item"
+          data-testid={`ghost-tech-${tech.id}`}
+        >
+          <TechIcon icon={tech.icon} label={tech.name} size={15} />
+          <span className="truncate">
+            Servicio <span className="text-fg">{tech.name}</span>
+          </span>
+        </Command.Item>
+      ))}
       {brokers.map((broker) => (
         <Command.Item
           key={broker.id}
@@ -428,25 +502,25 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
         </Command.Item>
       ))}
       <div className={q ? 'flex flex-col' : 'ghost-kinds'}>
-        {creatable.map((kind, i) => (
+        {options.map((o, i) => (
           <Command.Item
-            key={kind}
-            value={`create:${kind}`}
-            onSelect={() => create(kind, q)}
+            key={o.value}
+            value={o.value}
+            onSelect={o.run}
             className={q ? 'ghost-item' : 'ghost-kind'}
-            title={`${KIND_DESCRIPTION[kind]}. Ej.: ${KIND_EXAMPLES[kind].join(', ')}`}
-            data-testid={`ghost-create-${kind}`}
+            title={`${o.desc}. Ej.: ${o.examples.join(', ')}`}
+            data-testid={o.testId}
           >
-            <span className="ghost-chip" style={{ ['--kind' as string]: `var(--kind-${kind})` }}>
-              <Glyph name={kind} size={15} />
+            <span className="ghost-chip" style={{ ['--kind' as string]: `var(--kind-${o.glyph})` }}>
+              <Glyph name={o.glyph} size={15} />
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-fg">{KIND_LABEL[kind]}</span>
+              <span className="truncate text-fg">{o.label}</span>
               {q ? null : (
                 <>
-                  <span className="ghost-kind__desc">{KIND_DESCRIPTION[kind]}</span>
+                  <span className="ghost-kind__desc">{o.desc}</span>
                   <span className="truncate text-[10.5px] text-fg-subtle">
-                    Ej.: {KIND_EXAMPLES[kind].slice(0, 2).join(' · ')}
+                    Ej.: {o.examples.slice(0, 2).join(' · ')}
                   </span>
                 </>
               )}
@@ -512,7 +586,10 @@ export function GhostPicker({ ghost, view }: { ghost: GhostState; view: View }) 
     });
   }
   if (blocks.length) {
-    sections.push({
+    // En despliegue van justo después de "Crear nuevo": primero la infraestructura (una red, un
+    // clúster) y después lo que se despliega en ella. En C4, al final.
+    const index = deployment ? sections.findIndex((s) => s.key === 'create') + 1 : sections.length;
+    sections.splice(index, 0, {
       key: 'blocks',
       node: (
         <Command.Group

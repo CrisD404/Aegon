@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('node-home-banking')).toBeVisible();
   await framed(page, 'landscape');
-  await page.getByTestId('node-home-banking').dblclick();
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await framed(page, 'home-banking-containers');
 });
 

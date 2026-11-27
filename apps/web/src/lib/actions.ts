@@ -1,6 +1,12 @@
 import {
   KIND_LABEL,
+  STATUS_LABEL,
+  AUTO_ROUTE,
   arrangeViewOp,
+  edgeStyleWith,
+  hasManualRoute,
+  reconnectOp,
+  routeResetOps,
   childViewOf,
   connectOp,
   createElementOp,
@@ -16,15 +22,41 @@ import {
   type Id,
   type NodeLayout,
   type Op,
+  type Status,
   type View,
   levelRank,
   canHaveParent,
   newInstance,
   fitFramesOp,
+  applyOp,
+  c4ChildrenOf,
+  canExpandInView,
+  fitExpandedOp,
+  isExpandedInView,
+  setDepthOp,
+  toggleExpandOp,
+  unplaceWithNested,
+  copyDeploymentOp,
+  deployAllOp,
+  FRAME_PADDING,
+  ancestorsOf,
+  convertToInstanceOp,
+  convertToNodeOp,
+  createDeployedOp,
+  descendantsOf,
+  detailInstanceOp,
+  growFramesOp,
+  livesOnlyIn,
+  visualParentOf,
+  type DeployedSoftware,
+  deploymentViewName,
+  environmentsOf,
+  type Depth,
+  type Model,
 } from '@aegon/core';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
-import { IMPLIED_PREFIX } from '../canvas/derive.ts';
+import { derivedEdgeEnds } from '../canvas/derive.ts';
 import { canvasApi } from '../canvas/api.ts';
 import { align, distribute, type AlignMode } from './geometry.ts';
 import { elkArrangeOp } from './elk-layout.ts';
@@ -46,6 +78,104 @@ function dispatch(op: Op, label?: string) {
   return ws().dispatch(op, label ? { label } : {});
 }
 
+/**
+ * Los marcos abiertos envuelven justo a su contenido: después de mover, crear o ubicar algo
+ * adentro, se suma su ajuste al mismo lote (un solo paso de deshacer).
+ */
+export function withOpenFit(model: Model, viewId: Id, ops: Op[]): Op[] {
+  if (!ops.length || !model.views[viewId]?.expanded?.length) return ops;
+  try {
+    let next = model;
+    for (const op of ops) next = applyOp(next, op).model;
+    const fit = fitExpandedOp(next, viewId);
+    return fit ? [...ops, fit] : ops;
+  } catch {
+    // Si el lote es inválido, lo informa dispatch con su mensaje.
+    return ops;
+  }
+}
+
+/** Los marcos (nodos, grupos) crecen para seguir conteniendo lo que se crea o se ubica adentro. */
+function withFrameGrow(model: Model, viewId: Id, ops: Op[], around: Id[]): Op[] {
+  if (!ops.length || !around.length) return ops;
+  try {
+    let next = model;
+    for (const op of ops) next = applyOp(next, op).model;
+    const grow = growFramesOp(next, viewId, around);
+    return grow ? [...ops, grow] : ops;
+  } catch {
+    return ops;
+  }
+}
+
+/** Un nodo creado dentro de otro (un servidor en una subred) nace compacto: el de afuera crece para contenerlo. */
+const NESTED_NODE_SIZE = { w: 300, h: 180 } as const;
+
+/**
+ * Punto donde cae el centro de algo nuevo en un despliegue: si cae en un nodo, se corre lo justo
+ * para quedar adentro del margen de arriba y de la izquierda (el nodo crece hacia abajo y a la
+ * derecha) y sin pisar lo que el nodo ya tiene.
+ */
+function landIn(model: Model, view: View, kind: ElementKind, at: { x: number; y: number }, size: { w: number; h: number }) {
+  if (view.level !== 'deployment') return at;
+  const frame = frameAt(model, view, kind, at);
+  const layout = frame ? view.nodes[frame] : undefined;
+  if (!frame || !layout) return at;
+  const x = Math.max(at.x - size.w / 2, layout.x + FRAME_PADDING.side);
+  let y = Math.max(at.y - size.h / 2, layout.y + FRAME_PADDING.top);
+  // Tampoco cae encima de lo que el nodo ya tiene: baja hasta encontrar lugar.
+  const siblings = Object.entries(view.nodes)
+    .filter(([id]) => model.elements[id] && visualParentOf(model, view, model.elements[id]!) === frame)
+    .map(([id, l]) => ({ x: l.x, y: l.y, ...sizeOf(model.elements[id]!, l) }));
+  for (let i = 0; i < 40; i++) {
+    const hit = siblings.find((r) => x < r.x + r.w + LAND_GAP && x + size.w + LAND_GAP > r.x && y < r.y + r.h + LAND_GAP && y + size.h + LAND_GAP > r.y);
+    if (!hit) break;
+    y = hit.y + hit.h + LAND_GAP;
+  }
+  return { x: x + size.w / 2, y: y + size.h / 2 };
+}
+
+/** Aire mínimo entre lo nuevo y lo que ya estaba en el mismo nodo. */
+const LAND_GAP = 16;
+
+/**
+ * Saca de la selección lo que ya no existe (se eliminó, o se deshizo su creación): si queda un ID
+ * fantasma, cada click nuevo se suma a una selección múltiple que nadie ve.
+ */
+export function pruneSelection() {
+  const { model } = ws();
+  const sel = ui().selection;
+  const nodes = sel.nodes.filter((id) => model.elements[id]);
+  const edges = sel.edges.filter((id) => {
+    if (model.relations[id]) return true;
+    const ends = derivedEdgeEnds(id);
+    return !!ends && !!model.elements[ends.from] && !!model.elements[ends.to];
+  });
+  if (nodes.length !== sel.nodes.length || edges.length !== sel.edges.length) ui().setSelection({ nodes, edges });
+}
+
+useWorkspace.subscribe((state, prev) => {
+  if (state.model !== prev.model) pruneSelection();
+});
+
+/**
+ * Elemento abierto en el lugar (el más chico) que contiene el punto. Con un tipo, solo los que
+ * pueden ser padre de ese tipo (un componente va en un contenedor, no en un sistema).
+ */
+export function openFrameAt(model: Model, view: View, point: { x: number; y: number }, kind?: ElementKind): Id | null {
+  let best: { id: Id; area: number } | null = null;
+  for (const id of view.expanded ?? []) {
+    const el = model.elements[id];
+    const layout = view.nodes[id];
+    if (!el || !layout || (kind && !canHaveParent(kind, el.kind))) continue;
+    const s = sizeOf(el, layout);
+    if (point.x < layout.x || point.x > layout.x + s.w || point.y < layout.y || point.y > layout.y + s.h) continue;
+    const area = s.w * s.h;
+    if (!best || area < best.area) best = { id, area };
+  }
+  return best?.id ?? null;
+}
+
 export function createElementAt(
   kind: ElementKind,
   name: string,
@@ -55,7 +185,11 @@ export function createElementAt(
   const view = activeView();
   if (!view) return null;
   const model = ws().model;
-  const size = sizeOf({ kind });
+  const nested = kind === 'node' && view.level === 'deployment' && !!frameAt(model, view, kind, at);
+  const size = nested ? NESTED_NODE_SIZE : sizeOf({ kind });
+  // El marco que lo contiene se decide por donde se hizo click; después el punto se acomoda adentro.
+  const clicked = { x: Math.round(at.x - size.w / 2), y: Math.round(at.y - size.h / 2) };
+  at = landIn(model, view, kind, at, size);
   const centered = { x: Math.round(at.x - size.w / 2), y: Math.round(at.y - size.h / 2) };
   const fields: Partial<Element> = { ...opts.fields };
   // En un lienzo de despliegue lo nuevo es de su ambiente (salvo lo que suele ser compartido:
@@ -64,6 +198,9 @@ export function createElementAt(
     const nodeType = kind === 'node' ? (fields as { node?: { type?: string } }).node?.type : undefined;
     if (!nodeType || !['datacenter', 'cloud', 'region', 'zone'].includes(nodeType)) fields.environments = [view.environment];
   }
+  // Dentro de un elemento abierto en el lugar, lo nuevo es hijo suyo.
+  const inside = fields.parent === undefined ? openFrameAt(model, view, at, kind) : null;
+  if (inside) fields.parent = inside;
   const { op, id } = createElementOp(model, {
     kind,
     name: name.trim() || KIND_LABEL[kind],
@@ -71,7 +208,8 @@ export function createElementAt(
     at: centered,
     fields,
   });
-  const ops: Op[] = [op, ...groupMembershipOps(model, view, id, kind, centered, size)];
+  const ops: Op[] = [op, ...(inside ? [] : groupMembershipOps(model, view, id, kind, clicked, size))];
+  if (nested) ops.push({ type: 'view.place', view: view.id, nodes: { [id]: { ...centered, ...NESTED_NODE_SIZE } } });
   let relationId: Id | null = null;
   if (opts.connectFrom && kind !== 'group') {
     // El elemento es nuevo: la relación siempre se crea.
@@ -79,10 +217,40 @@ export function createElementAt(
     if (rel.op) ops.push(rel.op);
     relationId = rel.id;
   }
-  if (!dispatch({ type: 'batch', ops, label: `Agregar ${name || KIND_LABEL[kind]}` })) return null;
+  const all = withFrameGrow(model, view.id, withOpenFit(model, view.id, ops), view.level === 'deployment' ? [id] : []);
+  if (!dispatch({ type: 'batch', ops: all, label: `Agregar ${name || KIND_LABEL[kind]}` })) return null;
   ui().markFresh(relationId ? [id, relationId] : [id]);
   ui().select([id], []);
   return id;
+}
+
+/**
+ * Software que nace desplegado en el lienzo de despliegue actual: crea el servicio (o base, bus) en
+ * el modelo y su instancia acá, dentro del nodo donde cae el punto. La instancia lleva la dirección.
+ */
+export function createDeployedAt(
+  what: DeployedSoftware,
+  name: string,
+  at: { x: number; y: number },
+  opts: { connectFrom?: Id; fields?: Partial<Element> } = {},
+): Id | null {
+  const view = activeView();
+  if (!view || view.level !== 'deployment') return null;
+  const model = ws().model;
+  const fallback = what === 'store' ? KIND_LABEL.store : what === 'bus' ? KIND_LABEL.bus : 'Servicio';
+  const parent = frameAt(model, view, 'instance', at);
+  const point = landIn(model, view, 'instance', at, sizeOf({ kind: 'instance' }));
+  const result = createDeployedOp(model, view.id, { what, name: name.trim() || fallback, at: point, fields: opts.fields, parent });
+  if (!result || result.op.type !== 'batch') return null;
+  const ops: Op[] = [...result.op.ops];
+  if (opts.connectFrom) {
+    const rel = connectOp(model, opts.connectFrom, result.id);
+    if (rel.op) ops.push(rel.op);
+  }
+  if (!dispatch({ type: 'batch', ops: withFrameGrow(model, view.id, ops, [result.id]), label: result.op.label })) return null;
+  ui().markFresh([result.id]);
+  ui().select([result.id]);
+  return result.id;
 }
 
 /** Marco del lienzo (el más chico) que contiene el punto: un nodo de despliegue o un grupo. */
@@ -129,6 +297,7 @@ export function deployAt(of: Id, at: { x: number; y: number }, opts: { connectFr
   const parent = frameAt(model, view, 'instance', at) ?? undefined;
   const instance = newInstance(model, of, { parent, environment: view.environment });
   const size = sizeOf(instance);
+  at = landIn(model, view, 'instance', at, size);
   const pos = { x: Math.round(at.x - size.w / 2), y: Math.round(at.y - size.h / 2) };
   const ops: Op[] = [
     { type: 'element.add', element: instance },
@@ -138,7 +307,7 @@ export function deployAt(of: Id, at: { x: number; y: number }, opts: { connectFr
     const rel = connectOp(model, opts.connectFrom, instance.id);
     if (rel.op) ops.push(rel.op);
   }
-  if (!dispatch({ type: 'batch', ops, label: `Desplegar ${target.name}` })) return null;
+  if (!dispatch({ type: 'batch', ops: withFrameGrow(model, view.id, ops, [instance.id]), label: `Desplegar ${target.name}` })) return null;
   ui().markFresh([instance.id]);
   ui().select([instance.id]);
   return instance.id;
@@ -158,8 +327,9 @@ export function placeExisting(
     ui().toast(`"${el.name}" ya está en este lienzo`);
     return false;
   }
-  // Un contenedor (o base, bus) que cae en un despliegue se despliega: se crea su instancia.
-  if (view.level === 'deployment' && (el.kind === 'container' || el.kind === 'store' || el.kind === 'bus')) {
+  // Software que cae en un despliegue se despliega: se crea su instancia, que es la que lleva
+  // dirección, puertos y réplicas (un sistema puesto directo no los tiene).
+  if (view.level === 'deployment' && (el.kind === 'container' || el.kind === 'store' || el.kind === 'bus' || el.kind === 'system')) {
     return !!deployAt(id, at, opts);
   }
   const problem = placementProblem(model, view, el);
@@ -174,9 +344,47 @@ export function placeExisting(
     const rel = connectOp(model, opts.connectFrom, id);
     if (rel.op) ops.push(rel.op);
   }
-  if (!dispatch({ type: 'batch', ops, label: `Ubicar ${el.name}` })) return false;
+  const all = withFrameGrow(model, view.id, withOpenFit(model, view.id, ops), view.level === 'deployment' ? [id] : []);
+  if (!dispatch({ type: 'batch', ops: all, label: `Ubicar ${el.name}` })) return false;
   ui().markFresh([id]);
   ui().select([id]);
+  return true;
+}
+
+/**
+ * Abre o cierra un sistema o contenedor en el lugar: sus hijos aparecen dentro de un marco, en el
+ * mismo lienzo. Donde no se puede (un lienzo de despliegue), abre su lienzo de detalle.
+ */
+export function toggleExpand(id: Id): boolean {
+  const view = activeView();
+  const model = ws().model;
+  if (!view || !model.elements[id]) return false;
+  // En un despliegue nada lleva a otro lienzo: un sistema se detalla acá, en sus contenedores.
+  if (view.level === 'deployment') return detailInDeployment(id);
+  if (!canExpandInView(model, view, id)) return drillInto(id);
+  const opening = !isExpandedInView(view, id);
+  const op = toggleExpandOp(model, view.id, id);
+  if (!op || !dispatch(op)) return false;
+  ui().select([id]);
+  if (opening) {
+    const kids = c4ChildrenOf(model, id);
+    ui().markFresh(kids.map((k) => k.id));
+    canvasApi.reveal([id]);
+    if (!kids.length) ui().toast('Está vacío: hacé doble click adentro para crear lo que contiene');
+  }
+  return true;
+}
+
+/** Lleva todo el lienzo a una profundidad: contexto (1), contenedores (2) o componentes (3). */
+export function setDepth(depth: Depth): boolean {
+  const view = activeView();
+  if (!view) return false;
+  const op = setDepthOp(ws().model, view.id, depth);
+  if (!op) return false;
+  if (!dispatch(op)) return false;
+  ui().select([]);
+  // Cambió el tamaño de todo: se vuelve a encuadrar cuando ReactFlow ya tiene los nodos nuevos.
+  requestAnimationFrame(() => requestAnimationFrame(() => canvasApi.fit()));
   return true;
 }
 
@@ -255,24 +463,55 @@ function selectedElementIds(): Id[] {
   return ui().selection.nodes.filter((id) => view.nodes[id]);
 }
 
+function selectedRelationIds(): Id[] {
+  const { model } = ws();
+  return ui().selection.edges.filter((e) => !derivedEdgeEnds(e) && model.relations[e]);
+}
+
+/**
+ * Marca la selección (elementos y relaciones) con un estado: nuevo, se modifica, se da de baja,
+ * retirado, o existente para quitar la marca. Un solo paso de deshacer.
+ */
+export function setSelectionStatus(status: Status) {
+  const { model } = ws();
+  const value = status === 'live' ? null : status;
+  const ops: Op[] = [];
+  for (const id of selectedElementIds()) {
+    const el = model.elements[id];
+    if (el && (el.status ?? 'live') !== status) ops.push({ type: 'element.update', id, patch: { status: value } });
+  }
+  for (const id of selectedRelationIds()) {
+    if ((model.relations[id]!.status ?? 'live') !== status) ops.push({ type: 'relation.update', id, patch: { status: value } });
+  }
+  if (!ops.length) return;
+  const label = status === 'live' ? 'Quitar la marca de estado' : `Marcar como «${STATUS_LABEL[status].toLowerCase()}»`;
+  dispatch(ops.length === 1 ? ops[0]! : { type: 'batch', ops, label }, label);
+}
+
 export function removeSelectionFromView() {
   const view = activeView();
   if (!view) return;
   const ids = selectedElementIds();
-  const edges = ui().selection.edges.filter(
-    (e) => !e.startsWith(IMPLIED_PREFIX) && ws().model.relations[e],
-  );
-  const ops: Op[] = [];
-  if (ids.length) ops.push({ type: 'view.unplace', view: view.id, ids });
+  const edges = selectedRelationIds();
+  let ops: Op[] = [];
+  if (ids.length) {
+    // Un elemento abierto se va con lo que contiene.
+    const out = unplaceWithNested(ws().model, view.id, ids);
+    ops.push({ type: 'view.unplace', view: view.id, ids: out?.ids ?? ids });
+    if (out && (view.expanded ?? []).length !== (out.expanded ?? []).length) {
+      ops.push({ type: 'view.update', id: view.id, patch: { expanded: out.expanded } });
+    }
+  }
   for (const e of edges) ops.push({ type: 'relation.remove', id: e });
   if (!ops.length) return;
+  ops = withOpenFit(ws().model, view.id, ops);
   if (
     dispatch({ type: 'batch', ops, label: ids.length ? 'Quitar del lienzo' : 'Eliminar relación' })
   ) {
     ui().select([]);
     if (ids.length) {
       ui().toast(
-        `${ids.length === 1 ? 'Quitado' : `${ids.length} quitados`} del lienzo (siguen en el modelo)`,
+        `${ids.length === 1 ? 'Quitado' : `${ids.length} quitados`} de este lienzo (${ids.length === 1 ? 'sigue' : 'siguen'} en el modelo)`,
         'info',
         {
           label: 'Eliminar del modelo',
@@ -287,17 +526,29 @@ export function removeSelectionFromView() {
   }
 }
 
+/** Operaciones para eliminar del modelo: cada elemento se lleva lo que contiene y sus relaciones. */
+function removalOps(model: Model, ids: Id[], edges: Id[]): Op[] {
+  const picked = new Set(ids);
+  const roots = ids.filter((id) => !ancestorsOf(model, id).some((a) => picked.has(a.id)));
+  const removed = new Set<Id>();
+  for (const id of roots) {
+    removed.add(id);
+    for (const d of descendantsOf(model, id)) removed.add(d);
+  }
+  const loose = edges.filter((e) => {
+    const rel = model.relations[e];
+    return !!rel && !removed.has(rel.from) && !removed.has(rel.to);
+  });
+  return [...loose.map((id): Op => ({ type: 'relation.remove', id })), ...roots.map((id): Op => ({ type: 'element.remove', id }))];
+}
+
 export function deleteSelectionFromModel() {
+  const model = ws().model;
   const ids = selectedElementIds();
-  const edges = ui().selection.edges.filter(
-    (e) => !e.startsWith(IMPLIED_PREFIX) && ws().model.relations[e],
-  );
-  const ops: Op[] = [
-    ...ids.map((id): Op => ({ type: 'element.remove', id })),
-    ...edges.map((id): Op => ({ type: 'relation.remove', id })),
-  ];
+  const edges = selectedRelationIds();
+  const ops = removalOps(model, ids, edges);
   if (!ops.length) return;
-  const name = ids.length === 1 ? ws().model.elements[ids[0]!]?.name : `${ids.length} elementos`;
+  const name = ids.length === 1 ? model.elements[ids[0]!]?.name : ids.length ? `${ids.length} elementos` : undefined;
   if (dispatch({ type: 'batch', ops, label: `Eliminar ${name ?? 'relaciones'}` })) {
     ui().select([]);
     ui().toast(`Eliminado del modelo: ${name ?? 'relaciones'}`, 'info', {
@@ -307,14 +558,109 @@ export function deleteSelectionFromModel() {
   }
 }
 
+/**
+ * Supr. Lo que vive solo en este lienzo se elimina del modelo (sacarlo de acá lo dejaría huérfano);
+ * lo que también está en otros lienzos solo sale de este, y el aviso lo dice.
+ */
+export function deleteSelection() {
+  const view = activeView();
+  if (!view) return;
+  const model = ws().model;
+  const ids = selectedElementIds();
+  const edges = selectedRelationIds();
+  if (!ids.length) {
+    if (edges.length) removeSelectionFromView();
+    return;
+  }
+  const gone = ids.filter((id) => livesOnlyIn(model, view.id, id));
+  if (!gone.length) {
+    removeSelectionFromView();
+    return;
+  }
+  const kept = ids.filter((id) => !gone.includes(id));
+  let ops: Op[] = [];
+  if (kept.length) {
+    const out = unplaceWithNested(model, view.id, kept);
+    ops.push({ type: 'view.unplace', view: view.id, ids: out?.ids ?? kept });
+    if (out && (view.expanded ?? []).length !== (out.expanded ?? []).length) {
+      ops.push({ type: 'view.update', id: view.id, patch: { expanded: out.expanded } });
+    }
+  }
+  ops.push(...removalOps(model, gone, edges));
+  ops = withOpenFit(model, view.id, ops);
+  const name = gone.length === 1 ? (model.elements[gone[0]!]?.name ?? '') : `${gone.length} elementos`;
+  if (!dispatch({ type: 'batch', ops, label: `Eliminar ${name}` })) return;
+  ui().select([]);
+  const message = kept.length
+    ? `Eliminado: ${name}. ${kept.length === 1 ? `"${model.elements[kept[0]!]?.name}" solo salió` : `${kept.length} solo salieron`} de este lienzo porque ${kept.length === 1 ? 'está' : 'están'} en otros`
+    : `Eliminado: ${name}`;
+  ui().toast(message, 'info', { label: 'Deshacer', run: () => ws().undo() });
+}
+
 export function deleteElement(id: Id) {
   const name = ws().model.elements[id]?.name ?? id;
   if (dispatch({ type: 'element.remove', id }, `Eliminar ${name}`)) {
+    pruneSelection();
     ui().toast(`Eliminado del modelo: ${name}`, 'info', {
       label: 'Deshacer',
       run: () => ws().undo(),
     });
   }
+}
+
+/** Sistemas puestos directo en el despliegue → instancias suyas (llevan dirección y réplicas). */
+export function convertToInstances(ids: Id[]): boolean {
+  const view = activeView();
+  if (!view) return false;
+  const model = ws().model;
+  const result = convertToInstanceOp(model, view.id, ids);
+  // Queda en el mismo rectángulo: los marcos que lo contienen no tienen por qué crecer ni correrse.
+  if (!result || !dispatch(result.op)) return false;
+  ui().markFresh(result.ids);
+  ui().select(result.ids);
+  ui().toast(result.ids.length === 1 ? 'Ahora es una instancia: cargale dirección y puertos en Red' : `${result.ids.length} instancias: cargales dirección y puertos en Red`, 'success');
+  return true;
+}
+
+/** Sistemas que en realidad son equipos (un servidor, una VM) → nodos de despliegue, en el mismo lugar. */
+export function convertToNodes(ids: Id[]): boolean {
+  const view = activeView();
+  if (!view) return false;
+  const model = ws().model;
+  const result = convertToNodeOp(model, view.id, ids);
+  if (!result) return false;
+  if (result.op) {
+    // Ocupa el rectángulo que ocupaba el sistema: los marcos que lo contienen no crecen ni se corren.
+    if (!dispatch(result.op)) return false;
+    ui().markFresh(result.ids);
+    ui().select(result.ids);
+  }
+  const skipped = result.skipped;
+  if (skipped.length) {
+    ui().toast(`${skipped[0]!.reason}${skipped.length > 1 ? ` (y ${skipped.length - 1} más)` : ''}`, result.ids.length ? 'info' : 'error');
+  } else {
+    ui().toast(result.ids.length === 1 ? 'Ahora es un nodo: cargale tipo y dirección en el inspector' : `${result.ids.length} nodos: cargales tipo y dirección en el inspector`, 'success');
+  }
+  return result.ids.length > 0;
+}
+
+/** Detalla un sistema del despliegue en instancias de sus contenedores, cada una con su dirección. */
+export function detailInDeployment(id: Id): boolean {
+  const view = activeView();
+  const model = ws().model;
+  const el = model.elements[id];
+  if (!view || view.level !== 'deployment' || !el) return false;
+  const result = detailInstanceOp(model, view.id, id);
+  if (!result || result.op.type !== 'batch') {
+    const system = el.kind === 'instance' ? model.elements[el.instance.of] : el;
+    if (system?.kind === 'system') ui().toast(`"${system.name}" no tiene contenedores sin desplegar: creá sus servicios con doble click en el lienzo`);
+    return false;
+  }
+  if (!dispatch({ type: 'batch', ops: withFrameGrow(model, view.id, result.op.ops, result.ids), label: result.op.label })) return false;
+  ui().markFresh(result.ids);
+  ui().select(result.ids);
+  ui().toast(`${result.ids.length} ${result.ids.length === 1 ? 'instancia' : 'instancias'}: cada una lleva su propia dirección`, 'success', { label: 'Deshacer', run: () => ws().undo() });
+  return true;
 }
 
 export function duplicateSelection() {
@@ -325,6 +671,8 @@ export function duplicateSelection() {
   if (dispatch(op, 'Duplicar')) {
     ui().markFresh(created);
     ui().select(created);
+    // La copia puede caer fuera de la vista (un marco va al costado del original): se muestra.
+    canvasApi.reveal(created);
   }
 }
 
@@ -367,6 +715,7 @@ export function paste() {
   if (dispatch(op, 'Pegar')) {
     ui().markFresh(ids);
     ui().select(ids);
+    canvasApi.reveal(ids);
   }
 }
 
@@ -429,10 +778,31 @@ export async function arrange() {
     if (!op || op.type !== 'view.place' || ws().model !== model || ui().activeViewId !== view.id)
       return;
     await canvasApi.animateTo(op.nodes);
-    dispatch(op, ids.length > 1 ? 'Ordenar selección' : 'Ordenar lienzo');
+    // Los recorridos a mano eran para donde estaban los nodos: lo que se reordena vuelve a trazarse solo.
+    const resets = routeResetOps(model, view, new Set(Object.keys(op.nodes)));
+    const label = ids.length > 1 ? 'Ordenar selección' : 'Ordenar lienzo';
+    dispatch(resets.length ? { type: 'batch', ops: [op, ...resets], label } : op, label);
   } finally {
     arranging = false;
   }
+}
+
+/** Lleva un extremo de una relación a otro elemento (se soltó la punta de la flecha sobre él). */
+export function reconnect(relation: Id, end: 'from' | 'to', target: Id) {
+  const result = reconnectOp(ws().model, relation, end, target);
+  if (!result) return;
+  if ('problem' in result) {
+    ui().toast(result.problem);
+    return;
+  }
+  if (dispatch(result.op)) ui().select([], [relation]);
+}
+
+/** Quita lo acomodado a mano de una relación en el lienzo activo (recorrido y puntas): la flecha vuelve a trazarse sola. */
+export function resetRoute(relation: Id) {
+  const view = activeView();
+  if (!view || !hasManualRoute(view.edges?.[relation])) return;
+  dispatch({ type: 'view.edge', view: view.id, relation, style: edgeStyleWith(view, relation, AUTO_ROUTE) }, 'Volver al trazo automático');
 }
 
 export function createView(name = 'Nuevo lienzo') {
@@ -466,6 +836,51 @@ export function deleteView(id: Id) {
 
 export function setDefaultView(id: Id) {
   dispatch({ type: 'workspace.update', patch: { defaultView: id } }, 'Lienzo por defecto');
+}
+
+/**
+ * Despliega de una vez todo lo que falta en el ambiente del lienzo: dentro de `into` (un nodo del
+ * lienzo) o de un nodo nuevo con el nombre del ambiente.
+ */
+export function deployAll(into?: Id): boolean {
+  const view = activeView();
+  if (!view) return false;
+  const result = deployAllOp(ws().model, view.id, into);
+  if (!result) {
+    ui().toast('No falta desplegar nada en este ambiente');
+    return false;
+  }
+  if (!dispatch(result.op)) return false;
+  ui().markFresh(into ? result.ids : [result.node, ...result.ids]);
+  ui().select([result.node]);
+  canvasApi.reveal([result.node]);
+  const n = result.ids.length;
+  ui().toast(into ? `${n} ${n === 1 ? 'instancia desplegada' : 'instancias desplegadas'}` : `${n} ${n === 1 ? 'instancia' : 'instancias'} en un nodo nuevo: ponele nombre y tipo`, 'success');
+  return true;
+}
+
+/** Copia el despliegue del lienzo activo a otro ambiente y abre el lienzo nuevo. */
+export function copyDeploymentTo(env: Id): boolean {
+  const view = activeView();
+  if (!view) return false;
+  const model = ws().model;
+  const result = copyDeploymentOp(model, view.id, env);
+  if (!result || !dispatch(result.op)) return false;
+  ui().openView(result.viewId, { transition: 'fade' });
+  const name = environmentsOf(model).find((e) => e.id === env)?.name ?? env;
+  ui().toast(`Despliegue copiado a ${name}: revisá réplicas y direcciones, que son de cada ambiente`, 'success');
+  return true;
+}
+
+/** Lienzo de despliegue vacío para otro ambiente del mismo sistema. */
+export function createEmptyDeployment(env: Id): boolean {
+  const view = activeView();
+  if (!view) return false;
+  const model = ws().model;
+  const { op, id } = createViewOp(model, deploymentViewName(model, env, view.scope), 'deployment', view.scope, env);
+  if (!dispatch(op, 'Crear lienzo de despliegue')) return false;
+  ui().openView(id, { transition: 'fade' });
+  return true;
 }
 
 /** Ajusta los marcos (nodos de despliegue y grupos) del lienzo a lo que contienen. */

@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function openContainers(page: Page) {
-  await page.getByTestId('node-home-banking').dblclick();
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await framed(page, 'home-banking-containers');
 }
 

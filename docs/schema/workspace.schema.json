@@ -41,6 +41,9 @@
       "maxLength": 80,
       "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$"
     },
+    "strictC4": {
+      "type": "boolean"
+    },
     "environments": {
       "type": "array",
       "items": {

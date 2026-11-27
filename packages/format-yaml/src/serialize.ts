@@ -26,14 +26,15 @@ import { agentsMd, GITATTRIBUTES, GITIGNORE } from './agents-md.ts';
 
 /** Orden canónico de claves: el YAML resultante es estable y fácil de revisar en un diff. */
 const ORDER = {
-  workspace: ['schema', 'id', 'name', 'description', 'organization', 'architect', 'code', 'version', 'date', 'defaultView', 'environments', 'finops', 'extensions'],
+  workspace: ['schema', 'id', 'name', 'description', 'organization', 'architect', 'code', 'version', 'date', 'defaultView', 'strictC4', 'environments', 'finops', 'extensions'],
   element: [
     'id', 'kind', 'name', 'description', 'parent', 'groups', 'scope', 'status', 'risk', 'technology',
     'containerType', 'role', 'store', 'bus', 'group', 'node', 'infra', 'instance', 'addresses', 'resource', 'owner',
-    'tags', 'links', 'environments', 'finops', 'properties', 'docs', 'extensions',
+    'tags', 'links', 'environments', 'finops', 'load', 'properties', 'docs', 'extensions',
   ],
-  relation: ['id', 'from', 'to', 'label', 'description', 'protocols', 'ports', 'direction', 'status', 'tags', 'properties', 'extensions'],
-  view: ['id', 'name', 'level', 'scope', 'environment', 'description', 'nodes', 'edges', 'extensions'],
+  relation: ['id', 'from', 'to', 'label', 'description', 'protocols', 'ports', 'direction', 'back', 'calls', 'status', 'tags', 'properties', 'extensions'],
+  back: ['label', 'protocols', 'ports'],
+  view: ['id', 'name', 'level', 'scope', 'environment', 'description', 'nodes', 'edges', 'expanded', 'folded', 'extensions'],
   store: ['engine', 'customEngine', 'customIcon', 'type', 'version', 'managed'],
   bus: ['broker', 'customBroker', 'customIcon', 'type', 'topics'],
   group: ['provider', 'region', 'account', 'cidr'],
@@ -41,7 +42,7 @@ const ORDER = {
   instance: ['of', 'replicas'],
   layout: ['x', 'y', 'w', 'h'],
   link: ['label', 'url'],
-  edge: ['shape', 'hidden'],
+  edge: ['shape', 'hidden', 'from', 'to', 'points', 'labelAt', 'backLabelAt'],
   environment: ['id', 'name'],
   finopsSettings: ['currency', 'tagKeys', 'budgets'],
   finops: ['costs', 'tags'],
@@ -89,13 +90,16 @@ export function canonicalElement(el: Element, environments: readonly string[] = 
 }
 
 export function canonicalRelation(rel: Relation): Record<string, unknown> {
-  return ordered({ ...rel }, ORDER.relation);
+  const value: Record<string, unknown> = { ...rel };
+  if (rel.back) value.back = ordered(rel.back, ORDER.back);
+  return ordered(value, ORDER.relation);
 }
 
 export function canonicalView(view: View): Record<string, unknown> {
   const value: Record<string, unknown> = { ...view };
   value.nodes = orderedRecord(view.nodes, (l) => ordered(l, ORDER.layout));
   if (view.edges) value.edges = orderedRecord(view.edges, (e) => ordered(e, ORDER.edge));
+  if (view.folded) value.folded = orderedRecord(view.folded, (inner) => orderedRecord(inner, (l) => ordered(l, ORDER.layout)));
   return ordered(value, ORDER.view);
 }
 

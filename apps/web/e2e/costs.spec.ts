@@ -22,7 +22,7 @@ test('la capa de costos muestra totales por nodo y por ambiente', async ({ page 
   // En L2, la caché no está en desarrollo: queda atenuada con ese ambiente.
   await page.getByTestId('cost-chip-env').click();
   await page.getByRole('menuitem', { name: 'Desarrollo', exact: true }).click();
-  await page.getByTestId('node-home-banking').dblclick();
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await framed(page, 'home-banking-containers');
   await expect
     .poll(() => page.locator('.react-flow__node[data-id="cache"]').evaluate((el) => Number(getComputedStyle(el).opacity)))
@@ -30,7 +30,7 @@ test('la capa de costos muestra totales por nodo y por ambiente', async ({ page 
 });
 
 test('el inspector carga costos y despliegue por ambiente', async ({ page }) => {
-  await page.getByTestId('node-home-banking').dblclick();
+  await page.getByTestId('node-home-banking').dblclick({ modifiers: ['Alt'] });
   await framed(page, 'home-banking-containers');
   await page.getByTestId('node-web-app').click();
   const totalOwn = page.getByTestId('finops-total');

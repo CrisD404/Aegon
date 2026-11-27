@@ -1,9 +1,9 @@
 import { descendantsOf, type Model } from '../model/index.ts';
 import type { Id, NodeLayout, View } from '../schema/index.ts';
 import { allViewEdges, sizeOf, type ViewEdge } from '../ops/commands.ts';
-import { relationTechnology } from '../catalog/index.ts';
+import { relationBack, relationTechLines } from '../catalog/index.ts';
 import type { Op } from '../ops/index.ts';
-import { isFrameKind, visualParentOf } from './index.ts';
+import { isFrameInView, visualParentOf } from './index.ts';
 
 /** Grafo de ELK (el subconjunto que usa Aegon, sin depender de `elkjs` en el núcleo). */
 export type ElkLayoutOptions = Record<string, string>;
@@ -96,13 +96,27 @@ const DEPLOYMENT_OPTIONS: ElkLayoutOptions = {
   'elk.spacing.edgeNode': '60',
 };
 
-/** Texto de la etiqueta de una flecha, igual que en el lienzo: qué hace y, abajo, protocolo y puertos. */
-export function edgeLabelParts(edge: Pick<ViewEdge, 'relations' | 'implied' | 'projected'>): {
+/** Renglones de protocolo que entran en la etiqueta de una flecha; el resto se resume en "+N más". */
+const MAX_TECH_LINES = 4;
+
+const clampTech = (all: string[]) => (all.length > MAX_TECH_LINES ? [...all.slice(0, MAX_TECH_LINES - 1), `+${all.length - MAX_TECH_LINES + 1} más`] : all);
+
+/** Un bloque de la etiqueta de una flecha: qué hace y, abajo, sus protocolos y puertos. */
+export interface EdgeLabelBlock {
   label?: string;
   tech: string;
-} {
+  techLines: string[];
+}
+
+/**
+ * Texto de la etiqueta de una flecha, igual que en el lienzo: qué hace y, abajo, protocolo y
+ * puertos: un renglón por cada protocolo con sus puertos (`techLines`; `tech` es lo mismo en uno).
+ * Una relación bidireccional que declara su vuelta lleva además `back`: lo que va en el otro
+ * sentido, que el lienzo dibuja aparte, cerca de la punta a la que apunta.
+ */
+export function edgeLabelParts(edge: Pick<ViewEdge, 'relations' | 'implied' | 'projected'>): EdgeLabelBlock & { back?: EdgeLabelBlock } {
   const rel = edge.relations[0];
-  if (!rel) return { tech: '' };
+  if (!rel) return { tech: '', techLines: [] };
   const label = edge.implied
     ? edge.relations.length > 1
       ? `${edge.relations.length} relaciones`
@@ -110,7 +124,12 @@ export function edgeLabelParts(edge: Pick<ViewEdge, 'relations' | 'implied' | 'p
     : edge.projected && edge.relations.length > 1
       ? `${rel.label ?? 'Relación'} +${edge.relations.length - 1}`
       : rel.label;
-  return { label, tech: edge.implied ? '' : relationTechnology(rel) };
+  const all = edge.implied ? [] : relationTechLines(rel);
+  // La vuelta solo cuando la línea es esa relación sola: agrupadas, no hay un sentido que mostrar.
+  const returning = !edge.implied && edge.relations.length === 1 ? relationBack(rel) : undefined;
+  const backLines = returning ? relationTechLines(returning) : [];
+  const back = returning ? { label: returning.label, tech: backLines.join(' · '), techLines: clampTech(backLines) } : undefined;
+  return { label, tech: all.join(' · '), techLines: clampTech(all), ...(back ? { back } : {}) };
 }
 
 // Medidas de `.c4-edge-label` en el lienzo: Inter 11 px (línea 14,3), mono 10 px, hasta 200 px.
@@ -140,23 +159,54 @@ function wrapText(text: string, maxChars: number): { lines: number; longest: num
   return { lines, longest: Math.max(longest, current) };
 }
 
-/** Tamaño aproximado de la etiqueta de una flecha tal como la dibuja el lienzo (null si no tiene). */
-export function edgeLabelSize(
-  edge: Pick<ViewEdge, 'relations' | 'implied' | 'projected'>,
-): { width: number; height: number } | null {
-  const { label, tech } = edgeLabelParts(edge);
-  if (!label && !tech) return null;
-  const inner = LABEL_MAX_W - LABEL_PAD_W;
+/** Lo que suma la flechita de sentido delante de la etiqueta de cada lado. */
+const LABEL_ARROW_W = 15;
+/** Separación entre los dos bloques cuando van apilados en una sola etiqueta. */
+const LABEL_STACK_GAP = 5;
+
+/** Tamaño aproximado de un bloque de etiqueta tal como lo dibuja el lienzo (null si está vacío). */
+export function edgeLabelBlockSize(block: EdgeLabelBlock | undefined, arrow = false): { width: number; height: number } | null {
+  if (!block) return null;
+  const { label, techLines } = block;
+  if (!label && !techLines.length) return null;
+  const inner = LABEL_MAX_W - LABEL_PAD_W - (arrow ? LABEL_ARROW_W : 0);
   const main = label ? wrapText(label, Math.floor(inner / LABEL_CHAR_W)) : { lines: 0, longest: 0 };
-  const sub = tech
-    ? wrapText(`[${tech}]`, Math.floor(inner / TECH_CHAR_W))
-    : { lines: 0, longest: 0 };
+  const sub = { lines: 0, longest: 0 };
+  for (const line of techLines) {
+    const wrapped = wrapText(`[${line}]`, Math.floor(inner / TECH_CHAR_W));
+    sub.lines += wrapped.lines;
+    sub.longest = Math.max(sub.longest, wrapped.longest);
+  }
   const width = Math.min(
     LABEL_MAX_W,
-    Math.max(main.longest * LABEL_CHAR_W, sub.longest * TECH_CHAR_W) + LABEL_PAD_W,
+    Math.max(main.longest * LABEL_CHAR_W, sub.longest * TECH_CHAR_W) + LABEL_PAD_W + (arrow ? LABEL_ARROW_W : 0),
   );
   const height = main.lines * LABEL_LINE_H + sub.lines * TECH_LINE_H + LABEL_PAD_H;
   return { width: Math.ceil(width), height: Math.ceil(height) };
+}
+
+/**
+ * Tamaño de cada lado de la etiqueta de una flecha con ida y vuelta (`main` y `back`, cada uno con
+ * su flechita de sentido), o solo `main` si la flecha lleva una etiqueta sola.
+ */
+export function edgeLabelSizes(edge: Pick<ViewEdge, 'relations' | 'implied' | 'projected'>): {
+  main: { width: number; height: number } | null;
+  back: { width: number; height: number } | null;
+} {
+  const parts = edgeLabelParts(edge);
+  return { main: edgeLabelBlockSize(parts, !!parts.back), back: edgeLabelBlockSize(parts.back, true) };
+}
+
+/**
+ * Tamaño aproximado de la etiqueta de una flecha tal como la dibuja el lienzo (null si no tiene).
+ * Con ida y vuelta, es el de los dos bloques apilados: el lugar que hay que reservarle.
+ */
+export function edgeLabelSize(
+  edge: Pick<ViewEdge, 'relations' | 'implied' | 'projected'>,
+): { width: number; height: number } | null {
+  const { main, back } = edgeLabelSizes(edge);
+  if (!main || !back) return main ?? back;
+  return { width: Math.max(main.width, back.width), height: main.height + back.height - LABEL_PAD_H + LABEL_STACK_GAP };
 }
 
 export interface ElkPlan {
@@ -175,7 +225,7 @@ export function buildElkGraph(model: Model, view: View, ids?: readonly Id[]): El
   const selection = ids && ids.length > 1 ? new Set(ids) : null;
   const placed = Object.keys(view.nodes).filter((id) => model.elements[id]);
   const leaves = placed.filter(
-    (id) => !isFrameKind(model.elements[id]!.kind) && (!selection || selection.has(id)),
+    (id) => !isFrameInView(model, view, id) && (!selection || selection.has(id)),
   );
   if (leaves.length < 2) return null;
 
@@ -209,7 +259,7 @@ export function buildElkGraph(model: Model, view: View, ids?: readonly Id[]): El
     root.children = leaves.sort(byPosition).map((id) => elkNodes.get(id)!);
   } else {
     // Jerarquía visual: cada nodo cuelga del grupo (ubicado) que lo contiene.
-    const groups = placed.filter((id) => isFrameKind(model.elements[id]!.kind));
+    const groups = placed.filter((id) => isFrameInView(model, view, id));
     const childrenOf = new Map<Id, Id[]>();
     for (const id of [...leaves, ...groups]) {
       const parent = visualParentOf(model, view, model.elements[id]!) ?? '__root';
@@ -217,7 +267,7 @@ export function buildElkGraph(model: Model, view: View, ids?: readonly Id[]): El
     }
     const build = (id: Id): ElkGraphNode => {
       const children = (childrenOf.get(id) ?? []).sort(byPosition);
-      if (!isFrameKind(model.elements[id]?.kind ?? 'system')) return elkNodes.get(id)!;
+      if (!isFrameInView(model, view, id)) return elkNodes.get(id)!;
       targets.add(id);
       if (!children.length) {
         const layout = view.nodes[id]!;
@@ -369,15 +419,15 @@ export function elkResultToOp(
     if (!prev || !el) continue;
     const x = Math.round(r.x + dx);
     const y = Math.round(r.y + dy);
-    nodes[id] = isFrameKind(el.kind)
+    nodes[id] = isFrameInView(model, view, id)
       ? { x, y, w: Math.round(r.w), h: Math.round(r.h) }
       : { ...prev, x, y };
   }
 
   // Ordenando una selección, los marcos de sus miembros vuelven a envolverlos.
-  if (plan.targets.every((id) => !isFrameKind(model.elements[id]?.kind ?? 'system'))) {
+  if (plan.targets.every((id) => !isFrameInView(model, view, id))) {
     for (const [gid, layout] of Object.entries(view.nodes)) {
-      if (!isFrameKind(model.elements[gid]?.kind ?? 'system')) continue;
+      if (!isFrameInView(model, view, gid)) continue;
       const members = Object.keys(view.nodes).filter(
         (id) => model.elements[id] && visualParentOf(model, view, model.elements[id]!) === gid,
       );

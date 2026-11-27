@@ -20,10 +20,21 @@ function frameDepth(model: Model, id: Id): number {
   return depth;
 }
 
+/** ¿El lienzo muestra abierto (como marco, con sus hijos adentro) a este sistema o contenedor? */
+export function isExpandedInView(view: View, id: Id): boolean {
+  return !!view.nodes[id] && !!view.expanded?.includes(id);
+}
+
+/** ¿El elemento se dibuja como marco en este lienzo? Grupos, nodos de despliegue y lo abierto. */
+export function isFrameInView(model: Model, view: View, id: Id): boolean {
+  const el = model.elements[id];
+  return !!el && (isFrameKind(el.kind) || isExpandedInView(view, id));
+}
+
 /**
  * Marco (ubicado en el lienzo) que contiene visualmente a un elemento: para grupos y elementos
- * de despliegue, el ancestro ubicado más cercano; para el resto, el grupo ubicado más profundo
- * de los que integra.
+ * de despliegue, el ancestro ubicado más cercano; para el resto, su ancestro C4 más cercano que
+ * el lienzo muestra abierto y, si no hay, el grupo ubicado más profundo de los que integra.
  */
 export function visualParentOf(model: Model, view: View, el: Element): Id | undefined {
   if (el.kind === 'group' || el.kind === 'node' || el.kind === 'infra' || el.kind === 'instance') {
@@ -36,6 +47,15 @@ export function visualParentOf(model: Model, view: View, el: Element): Id | unde
       current = parent?.parent;
     }
     return undefined;
+  }
+  if (view.expanded?.length) {
+    let current = el.parent;
+    const seen = new Set<Id>();
+    while (current && !seen.has(current)) {
+      if (isExpandedInView(view, current)) return current;
+      seen.add(current);
+      current = model.elements[current]?.parent;
+    }
   }
   let best: Id | undefined;
   let bestDepth = -1;
@@ -197,7 +217,7 @@ export function arrangeViewOp(model: Model, viewId: Id, ids?: readonly Id[]): Op
     if (nested !== undefined) return nested;
   }
   const targets = (ids && ids.length > 1 ? ids : Object.keys(view.nodes)).filter(
-    (id) => view.nodes[id] && model.elements[id] && model.elements[id].kind !== 'group',
+    (id) => view.nodes[id] && model.elements[id] && model.elements[id].kind !== 'group' && !isExpandedInView(view, id),
   );
   const rects = targets.map((id) => {
     const layout = view.nodes[id]!;
@@ -355,6 +375,54 @@ function arrangeNestedOp(model: Model, view: View): Op | null | undefined {
     return prev.x !== l.x || prev.y !== l.y || prev.w !== l.w || prev.h !== l.h;
   });
   return changed.length ? { type: 'view.place', view: view.id, nodes: Object.fromEntries(changed) } : null;
+}
+
+/**
+ * Agranda los marcos que contienen a `around` (y los que contienen a esos) lo justo para que los
+ * sigan envolviendo con margen. Nunca achica ni mueve lo de adentro: un tamaño puesto a mano se
+ * respeta, y lo que ya estaba cerca de un borde no cuenta. Null si ya los contenían.
+ */
+export function growFramesOp(model: Model, viewId: Id, around: readonly Id[]): Op | null {
+  const view = model.views[viewId];
+  if (!view) return null;
+  const rects = new Map<Id, { x: number; y: number; w: number; h: number }>();
+  const rectOf = (id: Id) => {
+    const known = rects.get(id);
+    if (known) return known;
+    const el = model.elements[id];
+    const layout = view.nodes[id];
+    if (!el || !layout) return undefined;
+    const rect = { x: layout.x, y: layout.y, ...sizeOf(el, layout) };
+    rects.set(id, rect);
+    return rect;
+  };
+  const nodes: Record<Id, NodeLayout> = {};
+  for (const start of around) {
+    let child = rectOf(start);
+    const seen = new Set<Id>([start]);
+    let frame = model.elements[start] ? visualParentOf(model, view, model.elements[start]!) : undefined;
+    while (child && frame && !seen.has(frame)) {
+      seen.add(frame);
+      const el = model.elements[frame]!;
+      const prev = rectOf(frame);
+      if (!prev) break;
+      // Un elemento abierto en el lugar se ajusta justo a su contenido: de eso se ocupa `fitExpandedOp`.
+      if (el.kind === 'node' || el.kind === 'group') {
+        const x = Math.min(prev.x, Math.round(child.x - FRAME_PADDING.side));
+        const y = Math.min(prev.y, Math.round(child.y - FRAME_PADDING.top));
+        const right = Math.max(prev.x + prev.w, Math.round(child.x + child.w + FRAME_PADDING.side));
+        const bottom = Math.max(prev.y + prev.h, Math.round(child.y + child.h + FRAME_PADDING.bottom));
+        const next = { x, y, w: right - x, h: bottom - y };
+        if (next.x !== prev.x || next.y !== prev.y || next.w !== prev.w || next.h !== prev.h) {
+          rects.set(frame, next);
+          nodes[frame] = next;
+        }
+      }
+      child = rects.get(frame);
+      frame = visualParentOf(model, view, el);
+    }
+  }
+  return Object.keys(nodes).length ? { type: 'view.place', view: viewId, nodes } : null;
 }
 
 /**

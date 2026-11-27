@@ -7,6 +7,7 @@ import { add, connect, layout } from './commands/edit.ts';
 import { exportCommand, exportFlowCommand } from './commands/export.ts';
 import { comments, flow, flows } from './commands/flows.ts';
 import { init } from './commands/init.ts';
+import { simulate } from './commands/simulate.ts';
 import { UsageError, list, type Io } from './io.ts';
 import { Workspace, WorkspaceError } from './workspace.ts';
 
@@ -120,7 +121,7 @@ Despliegue:
   --resource <id>          ID del recurso en el proveedor (vpc-…, i-…, ARN)
   --env <a,b>              Ambientes donde existe
   --external               Elemento externo (fuera de la organización)
-  --status <estado>        planned, live, deprecated, retired
+  --status <estado>        planned (nuevo), live, changing (se modifica), deprecated (se da de baja), retired
   --risk <riesgo>          low, medium, high, critical
   --group <id>             Grupo al que pertenece (repetible)
   --tags <a,b>  --owner <equipo>`,
@@ -208,18 +209,26 @@ Despliegue:
     help: `Opciones:
   -l, --label <texto>      Qué hace la relación ("Lee y escribe", "Publica pagos")
   -d, --description <txt>  Descripción larga
-  -p, --protocols <a,b>    Protocolos del catálogo (https, rest, grpc, kafka, jdbc…)
-  --ports <a,b>            Puertos de destino (443, 8080)
+  -p, --protocols <a,b>    Protocolos del catálogo (https, rest, grpc, kafka, jdbc…). Cada uno puede
+                           llevar sus puertos: dns:53,ntp:123,ldap:389/636
+  --ports <a,b>            Puertos de destino sin protocolo (8080). Si coinciden con el puerto
+                           habitual de un protocolo (53 con dns), se muestran junto a ese
   --bidirectional          La comunicación va en ambos sentidos
-  --status <estado>        planned, live, deprecated, retired
+  --back-label <texto>     Qué hace en el otro sentido (de <hasta> hacia <desde>)
+  --back-protocols <a,b>   Protocolos del otro sentido, con los puertos por los que escucha <desde>:
+                           smb:445. Con cualquiera de los dos, la relación queda bidireccional
+  --status <estado>        planned (nuevo), live, changing (se modifica), deprecated (se da de baja), retired
 
-Si ya existe la relación al revés, se vuelve bidireccional; si ya existe, se completa con lo indicado.`,
+Si ya existe la relación al revés, se vuelve bidireccional y lo indicado queda como su vuelta; si ya
+existe, se completa con lo indicado.`,
     options: {
       label: { type: 'string', short: 'l' },
       description: { type: 'string', short: 'd' },
       protocols: { type: 'string', short: 'p' },
       ports: { type: 'string' },
       bidirectional: { type: 'boolean' },
+      'back-label': { type: 'string' },
+      'back-protocols': { type: 'string' },
       status: { type: 'string' },
     },
     run: async (io, pos, v) => {
@@ -240,6 +249,7 @@ Si ya existe la relación al revés, se vuelve bidireccional; si ya existe, se c
             return n;
           }),
           direction: v.bidirectional ? 'bidirectional' : undefined,
+          back: { label: str(v['back-label']), protocols: list(v['back-protocols'] as string | undefined) },
           status: oneOf<Status>(v.status, STATUSES, 'status'),
         },
         { json: !!v.json },
@@ -306,6 +316,24 @@ Un flujo: aegon export flow <id> mermaid|text (diagrama de secuencia de Mermaid 
     run: async (io, pos, v) => {
       need(pos, 1, 'flow <id>');
       return flow(io, await openWorkspace(io, v), pos[0]!, { json: !!v.json });
+    },
+  },
+  simulate: {
+    usage: 'simulate <pedidos-por-segundo>',
+    summary: 'Simula carga: cuánto le llega a cada parte y qué se satura primero',
+    help: `Reparte el tráfico por las relaciones del modelo y lo compara con lo que aguanta cada parte
+(capacidad por réplica × réplicas del ambiente). Lo que no está cargado se supone por tipo.
+
+Opciones:
+  --env <id>               Ambiente del que salen las réplicas (por defecto, el productivo)
+  --system <id>            Simula solo el tráfico que entra a este sistema
+  --strict                 Sale con 1 si algo se satura con ese tráfico`,
+    options: { env: { type: 'string' }, system: { type: 'string' }, strict: { type: 'boolean' } },
+    run: async (io, pos, v) => {
+      need(pos, 1, 'simulate <pedidos-por-segundo>');
+      const rps = Number(pos[0]);
+      if (!Number.isFinite(rps) || rps < 0) throw new UsageError(`"${pos[0]}" no es una cantidad de pedidos por segundo`);
+      return simulate(io, await openWorkspace(io, v), { rps, env: str(v.env), system: str(v.system), strict: !!v.strict, json: !!v.json });
     },
   },
   comments: {

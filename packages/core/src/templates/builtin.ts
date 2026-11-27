@@ -1,16 +1,135 @@
 import type { Model } from '../model/index.ts';
-import { SCHEMA_VERSION, type Element, type NodeLayout, type Relation } from '../schema/index.ts';
+import { SCHEMA_VERSION, type Element, type Level, type NodeLayout, type Relation } from '../schema/index.ts';
 import { demoModel } from '../demo.ts';
 import { BLOCK_VIEW, type Template } from './index.ts';
 
-/** Arma el modelo de un bloque de nivel 2 (contenedores sin padre: lo heredan al insertarse). */
-function block(id: string, name: string, elements: Element[], relations: Relation[], nodes: Record<string, NodeLayout>): Model {
+/**
+ * Arma el modelo de un bloque: de nivel 2 por defecto (contenedores sin padre: lo heredan al
+ * insertarse) o de despliegue (nodos e infraestructura sin ambiente: toman el del lienzo).
+ */
+function block(id: string, name: string, elements: Element[], relations: Relation[], nodes: Record<string, NodeLayout>, level: Level = 2): Model {
   return {
     workspace: { schema: SCHEMA_VERSION, id, name },
     elements: Object.fromEntries(elements.map((e) => [e.id, e])),
     relations: Object.fromEntries(relations.map((r) => [r.id, r])),
-    views: { [BLOCK_VIEW]: { id: BLOCK_VIEW, name, level: 2, nodes } },
+    views: { [BLOCK_VIEW]: { id: BLOCK_VIEW, name, level, nodes } },
   };
+}
+
+/**
+ * Bloques de despliegue: piezas de infraestructura genéricas, sin proveedor ni direcciones (los
+ * elige quien las usa). Cada marco envuelve justo a sus hijos con el margen de `FRAME_PADDING`
+ * (64 arriba, 40 a los costados y abajo), así "Ajustar marcos" no los mueve; los marcos vacíos
+ * miden 300×176 (o más), lo que ocupa una instancia con ese margen. Entre lo que une una flecha
+ * quedan 160 de aire (110 en vertical, 200 si cruza el borde de un marco) para que la etiqueta
+ * no tape nada.
+ */
+function deploymentBlocks(): Template[] {
+  const https = { protocols: ['https'], ports: [443] };
+  return [
+    {
+      id: 'builtin:red-subredes',
+      name: 'Red con subredes y balanceador',
+      description: 'Una red (VPC, VNet) con una subred pública que tiene el balanceador y una privada vacía, lista para desplegar instancias.',
+      kind: 'block',
+      builtin: true,
+      model: block(
+        'red-subredes',
+        'Red con subredes y balanceador',
+        [
+          { id: 'red', kind: 'node', name: 'Red', node: { type: 'network' } },
+          { id: 'subred-publica', kind: 'node', name: 'Subred pública', parent: 'red', node: { type: 'subnet' } },
+          { id: 'subred-privada', kind: 'node', name: 'Subred privada', parent: 'red', node: { type: 'subnet' } },
+          { id: 'balanceador', kind: 'infra', name: 'Balanceador', parent: 'subred-publica', infra: { type: 'load-balancer' } },
+        ],
+        [{ id: 'balanceador--subred-privada', from: 'balanceador', to: 'subred-privada', label: 'Balancea', ...https }],
+        {
+          red: { x: 0, y: 0, w: 1100, h: 280 },
+          'subred-publica': { x: 40, y: 64, w: 300, h: 176 },
+          balanceador: { x: 80, y: 128 },
+          'subred-privada': { x: 500, y: 64, w: 560, h: 176 },
+        },
+        'deployment',
+      ),
+    },
+    {
+      id: 'builtin:cluster-namespaces',
+      name: 'Clúster con namespaces',
+      description: 'Un clúster (Kubernetes, OpenShift) con su ingress y dos namespaces vacíos a los que rutea.',
+      kind: 'block',
+      builtin: true,
+      model: block(
+        'cluster-namespaces',
+        'Clúster con namespaces',
+        [
+          { id: 'cluster', kind: 'node', name: 'Clúster', node: { type: 'cluster' } },
+          { id: 'ingress', kind: 'infra', name: 'Ingress', parent: 'cluster', infra: { type: 'ingress' } },
+          { id: 'namespace-a', kind: 'node', name: 'Namespace A', parent: 'cluster', node: { type: 'namespace' } },
+          { id: 'namespace-b', kind: 'node', name: 'Namespace B', parent: 'cluster', node: { type: 'namespace' } },
+        ],
+        [
+          { id: 'ingress--namespace-a', from: 'ingress', to: 'namespace-a', label: 'Rutea', ...https },
+          { id: 'ingress--namespace-b', from: 'ingress', to: 'namespace-b', label: 'Rutea', ...https },
+        ],
+        {
+          cluster: { x: 0, y: 0, w: 720, h: 462 },
+          ingress: { x: 250, y: 64 },
+          'namespace-a': { x: 40, y: 246, w: 300, h: 176 },
+          'namespace-b': { x: 380, y: 246, w: 300, h: 176 },
+        },
+        'deployment',
+      ),
+    },
+    {
+      id: 'builtin:datacenter-firewall',
+      name: 'Datacenter con firewall',
+      description: 'Un datacenter propio (on-premise) con el firewall por el que entra el tráfico y un servidor detrás.',
+      kind: 'block',
+      builtin: true,
+      model: block(
+        'datacenter-firewall',
+        'Datacenter con firewall',
+        [
+          { id: 'datacenter', kind: 'node', name: 'Datacenter', node: { type: 'datacenter' } },
+          { id: 'firewall', kind: 'infra', name: 'Firewall', parent: 'datacenter', infra: { type: 'firewall' } },
+          { id: 'servidor', kind: 'node', name: 'Servidor', parent: 'datacenter', node: { type: 'server' } },
+        ],
+        [{ id: 'firewall--servidor', from: 'firewall', to: 'servidor', label: 'Permite', ...https }],
+        {
+          datacenter: { x: 0, y: 0, w: 760, h: 280 },
+          firewall: { x: 40, y: 116 },
+          servidor: { x: 420, y: 64, w: 300, h: 176 },
+        },
+        'deployment',
+      ),
+    },
+    {
+      id: 'builtin:borde-web',
+      name: 'Borde web',
+      description: 'El camino de entrada desde internet: DNS, CDN y WAF en cadena por HTTPS (443).',
+      kind: 'block',
+      builtin: true,
+      model: block(
+        'borde-web',
+        'Borde web',
+        [
+          { id: 'dns', kind: 'infra', name: 'DNS', infra: { type: 'dns' } },
+          { id: 'cdn', kind: 'infra', name: 'CDN', infra: { type: 'cdn' } },
+          { id: 'waf', kind: 'infra', name: 'WAF', infra: { type: 'waf' } },
+        ],
+        [
+          { id: 'dns--cdn', from: 'dns', to: 'cdn', label: 'Resuelve', ...https },
+          { id: 'cdn--waf', from: 'cdn', to: 'waf', label: 'Reenvía', ...https },
+        ],
+        {
+          dns: { x: 0, y: 0 },
+          cdn: { x: 380, y: 0 },
+          waf: { x: 760, y: 0 },
+        },
+        'deployment',
+      ),
+    },
+  ];
 }
 
 let cache: Template[] | null = null;
@@ -116,6 +235,7 @@ export function builtinTemplates(): Template[] {
         },
       ),
     },
+    ...deploymentBlocks(),
   ];
   return cache;
 }

@@ -1,4 +1,4 @@
-import { ancestorsOf, sortedValues, type Model } from '../model/index.ts';
+import { ancestorsOf, descendantsOf, sortedValues, type Model } from '../model/index.ts';
 import { DEPLOYMENT_KINDS, type Element, type ElementKind, type Id, type Relation, type View } from '../schema/index.ts';
 import { representativeInView, type ViewEdge } from '../ops/commands.ts';
 
@@ -133,6 +133,59 @@ export function projectedEdges(model: Model, view: View, explicit: readonly View
     }
   }
   return [...out.values()];
+}
+
+/**
+ * Sistemas en juego en un ambiente: los de sus lienzos de despliegue y los que ya tienen algo
+ * desplegado ahí.
+ */
+export function systemsInPlay(model: Model, env: Id): Id[] {
+  const systems = new Set<Id>();
+  for (const view of sortedValues(model.views)) {
+    if (view.level === 'deployment' && view.environment === env && view.scope) systems.add(view.scope);
+  }
+  for (const el of sortedValues(model.elements)) {
+    if (el.kind !== 'instance' || !inEnvironment(el, env)) continue;
+    const target = model.elements[el.instance.of];
+    if (!target || target.kind === 'system') continue;
+    const sys = [target, ...ancestorsOf(model, target.id)].find((e) => e.kind === 'system');
+    if (sys) systems.add(sys.id);
+  }
+  return [...systems];
+}
+
+/**
+ * Lo que falta desplegar en un ambiente: contenedores, bases y buses de esos sistemas que valen
+ * para el ambiente y todavía no tienen ninguna instancia en él.
+ */
+export function undeployedIn(model: Model, env: Id, systems: readonly Id[]): Element[] {
+  const deployed = new Set<Id>();
+  for (const el of Object.values(model.elements)) {
+    if (el.kind === 'instance' && inEnvironment(el, env)) deployed.add(el.instance.of);
+  }
+  const out: Element[] = [];
+  const seen = new Set<Id>();
+  for (const sys of systems) {
+    for (const id of descendantsOf(model, sys)) {
+      const el = model.elements[id];
+      if (!el || seen.has(id) || !(el.kind === 'container' || el.kind === 'store' || el.kind === 'bus')) continue;
+      seen.add(id);
+      if (inEnvironment(el, env) && !deployed.has(id)) out.push(el);
+    }
+  }
+  return out;
+}
+
+/**
+ * ¿El ambiente es el productivo? Se reconoce por el nombre o el ID ("prod", "producción"); si
+ * ninguno lo dice, es el último de la lista (el orden habitual es de desarrollo a producción).
+ */
+export function isProductionEnvironment(model: Model, env: Id): boolean {
+  const envs = model.workspace.environments ?? [];
+  const looksProd = (e: { id: string; name: string }) => /prod/i.test(`${e.id} ${e.name}`) && !/pre[\s_-]?prod|no[\s_-]?prod|non[\s_-]?prod/i.test(`${e.id} ${e.name}`);
+  const named = envs.filter(looksProd);
+  if (named.length) return named.some((e) => e.id === env);
+  return envs.length > 0 && envs[envs.length - 1]!.id === env;
 }
 
 /** Ruta de nodos de un elemento de despliegue ("Datacenter central › OCP › BANCA"). */

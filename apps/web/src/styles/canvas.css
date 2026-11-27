@@ -144,15 +144,6 @@
   opacity: 0.7;
 }
 
-.c4-node[data-status='planned'] {
-  border-style: dashed;
-}
-
-.c4-node[data-status='deprecated'],
-.c4-node[data-status='retired'] {
-  opacity: 0.6;
-}
-
 .c4-node[data-new] {
   animation: aegon-node-in var(--dur-3) var(--ease-spring);
 }
@@ -267,20 +258,37 @@
   color: var(--fg-muted);
 }
 
+/* Nombre, tipo y direcciones: lo que el nodo muestra siempre. Su alto decide cuánta descripción entra. */
+.c4-node__head {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 2px;
+  min-width: 0;
+}
+
+/*
+ * La descripción entra cuando el nodo se agranda y muestra los renglones que quepan (los cuenta
+ * `ElementNode`, que usa estas mismas medidas: renglón de 16 px, 4 px + 2 px de separación arriba).
+ */
 .c4-node__desc {
   margin: 4px 0 0;
   color: var(--fg-muted);
   font-size: 11.5px;
-  line-height: 1.4;
+  line-height: 16px;
+  flex: none;
   overflow: hidden;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
 
+/* Abajo alcanza con poco aire: el renglón ya trae el suyo, y así la descripción entra antes. */
 .c4-node[data-tall] {
   align-items: flex-start;
-  padding-top: 12px;
+  padding-top: 10px;
+  padding-bottom: 3px;
 }
 
 .c4-node[data-tall] .c4-node__body {
@@ -466,12 +474,17 @@
   border-color: transparent;
 }
 
+/*
+ * Los tiradores de las esquinas van por encima del borde "agarrable" de los marcos: si no, ese borde
+ * los tapa casi enteros y al querer redimensionar un marco desde una esquina se lo termina moviendo.
+ */
 .react-flow__resize-control.handle {
   width: 8px;
   height: 8px;
   border-radius: 2px;
   background: var(--panel);
   border: 1.5px solid var(--accent);
+  z-index: 1;
 }
 
 .c4-boundary {
@@ -512,6 +525,189 @@
   font-size: 11.5px;
 }
 
+/* Elemento abierto en el lugar: un sistema o contenedor que muestra a sus hijos adentro. */
+.c4-open {
+  --kind: var(--kind-system);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-radius: 22px;
+  border: 1.5px solid color-mix(in srgb, var(--kind) 36%, var(--line));
+  background: color-mix(in srgb, var(--kind) 4%, transparent);
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+
+.c4-open[data-kind='container'] {
+  --kind: var(--kind-container);
+  border-radius: 18px;
+}
+
+.c4-open[data-external] {
+  border-style: dashed;
+}
+
+.c4-open[data-new] {
+  animation: aegon-node-in var(--dur-3) var(--ease-spring);
+}
+
+.c4-open__head {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 28px);
+  color: var(--kind);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.c4-open__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c4-open__head small {
+  color: var(--fg-subtle);
+  font-weight: 500;
+  font-size: 11.5px;
+}
+
+.c4-open__btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: var(--kind);
+  background: color-mix(in srgb, var(--kind) 12%, var(--canvas));
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    opacity var(--dur-1) var(--ease-out);
+}
+
+.c4-open__btn:hover {
+  background: color-mix(in srgb, var(--kind) 24%, var(--canvas));
+}
+
+/* "Abrir aparte" aparece al pasar por el encabezado o con el marco seleccionado. */
+.c4-open__detail {
+  opacity: 0;
+  color: var(--fg-muted);
+  background: var(--raised);
+}
+
+.c4-open__head:hover .c4-open__detail,
+.c4-open__detail:focus-visible,
+.react-flow__node-open.selected .c4-open__detail {
+  opacity: 1;
+}
+
+.react-flow__node-open {
+  pointer-events: none !important;
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+.react-flow__node-open .c4-open__edge,
+.react-flow__node-open .c4-open__head,
+.react-flow__node-open .react-flow__handle,
+.react-flow__node-open.selected .c4-open {
+  pointer-events: all;
+}
+
+.react-flow__node-open.selected .c4-open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Borde "agarrable" del marco (el interior deja pasar clicks al lienzo). */
+.c4-open__edge {
+  position: absolute;
+  inset: -6px;
+  border-radius: 28px;
+  border: 8px solid transparent;
+}
+
+.react-flow[data-lod='far'] .c4-open__head small,
+.react-flow[data-lod='far'] .c4-open__detail {
+  display: none;
+}
+
+.c4-open__head .c4-cost {
+  position: static;
+}
+
+/* La insignia de hijos de una tarjeta es un botón: abre el elemento en el lugar. */
+button.c4-node__drill {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--dur-1) var(--ease-out);
+}
+
+button.c4-node__drill:hover {
+  background: color-mix(in srgb, var(--kind) 26%, transparent);
+}
+
+/* Profundidad del lienzo: cuánto del modelo se ve abierto. */
+.canvas-depth {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+}
+
+.canvas-shell:has(.ruler) .canvas-depth {
+  top: 36px;
+}
+
+.canvas-depth button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--fg-subtle);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--dur-1) var(--ease-out),
+    background var(--dur-1) var(--ease-out);
+}
+
+.canvas-depth button:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+
+.canvas-depth button[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 /* Relaciones ------------------------------------------------------------------------------------ */
 
 .c4-edge-path {
@@ -525,10 +721,6 @@
 
 .c4-edge-path[data-implied] {
   stroke-dasharray: 5 5;
-}
-
-.c4-edge-path[data-status='planned'] {
-  stroke-dasharray: 2 5;
 }
 
 .react-flow__edge:hover .c4-edge-path,
@@ -620,10 +812,62 @@
   color: var(--fg);
 }
 
+/* La etiqueta se arrastra a lo largo de su flecha (un click sin mover selecciona la flecha). */
+.c4-edge-label[data-movable] {
+  cursor: grab;
+  user-select: none;
+}
+
+.c4-edge-label[data-moving] {
+  cursor: grabbing;
+  border-color: var(--accent-ring);
+  z-index: 5;
+  transition: none;
+}
+
+/* Protocolo y puertos: un renglón por cada protocolo con puertos, sin partirse. */
 .c4-edge-label .tech {
   font-family: var(--font-mono);
   font-size: 10px;
+  line-height: 13px;
   color: var(--fg-subtle);
+  white-space: nowrap;
+}
+
+/*
+ * Ida y vuelta: cada sentido de una relación bidireccional es un bloque con su flechita, que apunta
+ * hacia donde va ese tráfico (el puerto es del que escucha, o sea de la punta a la que apunta). Van
+ * en dos etiquetas, cada una cerca de su punta, o apilados en una sola si la flecha es corta.
+ */
+.c4-edge-way {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.c4-edge-way__text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+}
+
+.c4-edge-dir {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 10px;
+  height: 14px;
+  color: var(--accent);
+}
+
+.c4-edge-way + .c4-edge-way {
+  align-self: stretch;
+  justify-content: center;
+  margin-top: 2px;
+  padding-top: 3px;
+  border-top: 1px solid var(--line);
 }
 
 /*
@@ -696,6 +940,74 @@
   background: var(--accent);
   pointer-events: none;
   z-index: 1000;
+}
+
+/*
+ * Separación con un vecino al arrastrar con Shift: un tramo entre los dos bordes, con topes en las
+ * puntas y la medida en el medio. Apagado cuando solo mide; con el color de las guías cuando esa
+ * distancia se repite en la fila o columna (ahí el nodo se acomoda solo).
+ */
+.guide-gap {
+  --gap: var(--fg-subtle);
+  position: absolute;
+  background: var(--gap);
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.guide-gap[data-equal] {
+  --gap: var(--accent);
+}
+
+.guide-gap::before,
+.guide-gap::after {
+  content: '';
+  position: absolute;
+  background: var(--gap);
+}
+
+.guide-gap[data-axis='h']::before,
+.guide-gap[data-axis='h']::after {
+  top: calc(var(--px) * -4);
+  width: var(--px);
+  height: calc(var(--px) * 9);
+}
+
+.guide-gap[data-axis='h']::after {
+  right: 0;
+}
+
+.guide-gap[data-axis='v']::before,
+.guide-gap[data-axis='v']::after {
+  left: calc(var(--px) * -4);
+  height: var(--px);
+  width: calc(var(--px) * 9);
+}
+
+.guide-gap[data-axis='v']::after {
+  bottom: 0;
+}
+
+.guide-gap span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  padding: 0 5px;
+  border-radius: 5px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.guide-gap[data-equal] span {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 /*
@@ -988,6 +1300,43 @@
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
   background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+}
+
+/* El control de tráfico del modo Simular. */
+.sim-range {
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--raised);
+  outline: none;
+  cursor: pointer;
+}
+
+.sim-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--panel);
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.sim-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--panel);
+  background: var(--accent);
+}
+
+.sim-range:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.c4-open__head .c4-load {
+  position: static;
+  animation: none;
 }
 
 /* En los marcos de grupo y del sistema abierto, el costo va junto a la etiqueta. */
@@ -1331,10 +1680,6 @@
   --provider: var(--provider-kubernetes);
 }
 
-.c4-deploy[data-status='planned'] {
-  border-style: dashed;
-}
-
 .c4-deploy[data-drop-target],
 .c4-group[data-drop-target] {
   border-style: solid;
@@ -1463,4 +1808,215 @@
 
 .c4-arrow-network {
   fill: color-mix(in srgb, var(--edge-network) 75%, var(--edge));
+}
+
+/* Estado: qué es nuevo, qué se modifica y qué se da de baja ------------------------------------ */
+/*
+ * Un solo lenguaje para nodos, marcos y flechas: el color del estado (ver `[data-status]` en
+ * app.css) y una etiqueta donde se declara. El punteado no se usa acá: queda para lo externo, lo
+ * implícito y los tramos de red.
+ */
+
+.c4-status {
+  position: absolute;
+  top: -9px;
+  left: 12px;
+  z-index: 3;
+  height: 17px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--status);
+  color: var(--status-ink);
+  box-shadow: 0 0 0 2px var(--canvas);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 17px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.c4-node[data-status] {
+  border-color: color-mix(in srgb, var(--status) 72%, var(--node-border));
+  background: color-mix(in srgb, var(--status) 7%, var(--node-bg));
+}
+
+.c4-deploy[data-status]:not([data-drop-target]),
+.c4-open[data-status],
+.c4-group[data-status]:not([data-drop-target]),
+.c4-boundary[data-status] {
+  border-color: color-mix(in srgb, var(--status) 68%, var(--line));
+  background: color-mix(in srgb, var(--status) 5%, transparent);
+}
+
+/* La selección manda sobre el color del estado. */
+.react-flow__node.selected :is(.c4-node, .c4-deploy, .c4-open, .c4-group)[data-status] {
+  border-color: var(--accent);
+}
+
+/* Lo retirado ya no está: se ve apagado y con el nombre tachado. */
+.c4-node[data-status='retired'] {
+  opacity: 0.62;
+}
+
+.c4-node[data-status='retired'] .c4-node__name,
+.c4-deploy[data-status='retired'] .c4-deploy__name,
+.c4-open[data-status='retired'] .c4-open__name {
+  text-decoration: line-through;
+  text-decoration-color: var(--fg-subtle);
+}
+
+/* De lejos la etiqueta acompaña la escala del nombre. */
+.react-flow[data-lod='far'] .c4-status {
+  transform: scale(var(--lod-scale, 1));
+  transform-origin: left bottom;
+}
+
+.c4-edge-path[data-status]:not([data-flow]) {
+  stroke: color-mix(in srgb, var(--status) 88%, var(--edge));
+}
+
+.react-flow__edge.selected .c4-edge-path[data-status] {
+  stroke: var(--edge-active);
+}
+
+.c4-edge-path[data-status='retired']:not([data-flow]) {
+  opacity: 0.6;
+}
+
+.c4-arrow-status {
+  fill: color-mix(in srgb, var(--status) 88%, var(--edge));
+}
+
+.c4-edge-label[data-status]:not([data-selected], [data-flow]) {
+  border-color: color-mix(in srgb, var(--status) 55%, var(--line));
+}
+
+.c4-edge-mark {
+  color: var(--status);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Leyenda de estados del lienzo (abajo a la izquierda): aparece cuando hay algo marcado. */
+.canvas-status {
+  position: absolute;
+  left: 12px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  /* En columna, como la leyenda de un plano: no compite con la barra de abajo. */
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  min-width: 148px;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+}
+
+.canvas-shell:has(.ruler) .canvas-status {
+  left: 36px;
+}
+
+.canvas-status button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+
+.canvas-status button:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.canvas-status button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--status) 14%, transparent);
+  color: var(--fg);
+}
+
+.canvas-status__count {
+  margin-left: auto;
+  padding-left: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--fg-subtle);
+}
+
+/* Puntos de una flecha seleccionada: por dónde pasa (llenos) y dónde se le puede sumar uno (huecos). */
+.c4-edge-point {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  border: 2px solid var(--accent);
+  background: var(--panel);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--canvas) 70%, transparent);
+  pointer-events: all;
+  cursor: grab;
+  touch-action: none;
+}
+
+.c4-edge-point:hover {
+  background: var(--accent);
+}
+
+.c4-edge-point:active {
+  cursor: grabbing;
+}
+
+.c4-edge-point[data-add] {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  opacity: 0.85;
+}
+
+.c4-edge-point[data-add]:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  opacity: 1;
+}
+
+/* Las puntas: cuadradas, se deslizan por el borde del nodo. Llena cuando esa punta está fija. */
+.c4-edge-point[data-end] {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  cursor: move;
+}
+
+.c4-edge-point[data-end][data-fixed] {
+  background: var(--accent);
+}
+
+/* Nodo al que se mudaría la flecha cuya punta se está arrastrando. */
+.react-flow__node[data-connect-target] :is(.c4-node, .c4-deploy, .c4-open) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }

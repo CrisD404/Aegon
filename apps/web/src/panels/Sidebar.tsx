@@ -24,7 +24,7 @@ import { openNewDeploymentView } from '../lib/flows.tsx';
 import { viewBadge } from '../lib/view-badge.ts';
 import { elementIcon } from '../canvas/nodes/ElementNode.tsx';
 import { DRAG_MIME } from '../canvas/api.ts';
-import { cn, IconButton, SectionTitle } from '../ui/primitives.tsx';
+import { cn, SectionTitle } from '../ui/primitives.tsx';
 
 type Row =
   | { type: 'section'; key: string; label: string; count: number }
@@ -39,6 +39,10 @@ function levelOf(el: Element): Level | null {
   if (el.kind === 'store' || el.kind === 'bus') return el.parent ? 2 : 1;
   return 1;
 }
+
+/** Botones "nuevo lienzo" de la pestaña Lienzos: con texto, para que el despliegue se encuentre. */
+const NEW_VIEW_BUTTON =
+  'flex h-7 flex-1 items-center justify-center gap-1.5 rounded-sm border border-line text-[12px] font-medium text-fg-muted transition-colors hover:border-line-strong hover:bg-hover hover:text-fg';
 
 const normalize = (s: string) =>
   s
@@ -201,16 +205,6 @@ export function Sidebar() {
             {tab === id ? <span className="absolute right-2 bottom-[-1px] left-2 h-[2px] rounded-full bg-accent" /> : null}
           </button>
         ))}
-        {tab === 'views' ? (
-          <>
-            <IconButton size="sm" className="mt-1 ml-auto" label="Nuevo lienzo de contexto (L1)" onClick={() => createView()}>
-              <Plus size={14} />
-            </IconButton>
-            <IconButton size="sm" className="mt-1" label="Nuevo lienzo de despliegue" onClick={() => void openNewDeploymentView()} data-testid="new-deployment-view">
-              <Server size={14} />
-            </IconButton>
-          </>
-        ) : null}
       </div>
 
       {tab === 'flows' ? <FlowsPanel /> : null}
@@ -225,6 +219,16 @@ export function Sidebar() {
             spellCheck={false}
           />
         </div>
+        {tab === 'views' ? (
+          <div className="flex gap-1.5">
+            <button type="button" onClick={() => createView()} className={NEW_VIEW_BUTTON} data-testid="new-view">
+              <Plus size={13} /> Lienzo
+            </button>
+            <button type="button" onClick={() => void openNewDeploymentView()} className={NEW_VIEW_BUTTON} data-testid="new-deployment-view">
+              <Server size={13} /> Despliegue
+            </button>
+          </div>
+        ) : null}
         {tab === 'model' ? (
           <div className="flex gap-1">
             {([1, 2, 3] as const).map((l) => (
@@ -316,6 +320,11 @@ function ElementRow({ row, selected, onToggle }: { row: Extract<Row, { type: 'el
           <TechIcon icon={groupIcon ?? icon} label={label} size={14} />
         </span>
         <span className={cn('truncate', el.scope === 'external' && 'italic')}>{el.name}</span>
+        {(el.kind === 'node' || el.kind === 'infra' || el.kind === 'instance') && el.environments?.length ? (
+          <span className="shrink-0 rounded-xs bg-raised px-1 font-mono text-[9.5px] font-bold tracking-wide text-fg-subtle uppercase" title="Ambiente">
+            {el.environments.join(' ')}
+          </span>
+        ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-1">
           {row.inView ? <span className="h-1.5 w-1.5 rounded-full bg-accent" title="En el lienzo actual" /> : null}
           {'risk' in el && el.risk && (el.risk === 'high' || el.risk === 'critical') ? (
